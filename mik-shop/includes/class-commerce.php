@@ -96,8 +96,11 @@ class Commerce {
     public static function notify(int $id): bool {
         global $wpdb;if(!function_exists('wp_tempnam')){require_once ABSPATH.'wp-admin/includes/file.php';}$o=self::order($id,true);$path=wp_tempnam('mik-order-'.$id.'.xls');
         if(!$path){$wpdb->update(DB::table('orders'),['mail_status'=>'failed'],['id'=>$id]);return false;}
-        file_put_contents($path,Documents::xls($o));
-        $ok=wp_mail(Settings::get('email'),'Заказ MIK #'.$id,"Новый заказ #$id.\nПокупатель: ".$o['customer']['name']."\nEmail: ".$o['customer']['email']."\nТелефон: ".$o['customer']['phone']."\nЗаказ в приложении.\nАдминка: ".admin_url('admin.php?page=mik-shop&tab=orders'),[],[$path]);
-        @unlink($path);$wpdb->update(DB::table('orders'),['mail_status'=>$ok?'sent':'failed'],['id'=>$id]);return $ok;
+        $xls_path=$path.'.xls';if(!@rename($path,$xls_path)){@unlink($path);$wpdb->update(DB::table('orders'),['mail_status'=>'failed'],['id'=>$id]);return false;}
+        try {
+            $bytes=Documents::xls($o);if(file_put_contents($xls_path,$bytes)!==strlen($bytes)){throw new \RuntimeException('Не удалось записать файл заказа.');}
+            $ok=wp_mail(Settings::get('email'),'Заказ MIK #'.$id,"Новый заказ #$id.\nПокупатель: ".$o['customer']['name']."\nEmail: ".$o['customer']['email']."\nТелефон: ".$o['customer']['phone']."\nЗаказ в приложении.\nАдминка: ".admin_url('admin.php?page=mik-shop&tab=orders'),[],[$xls_path]);
+        } finally { @unlink($xls_path); }
+        $wpdb->update(DB::table('orders'),['mail_status'=>$ok?'sent':'failed'],['id'=>$id]);return $ok;
     }
 }

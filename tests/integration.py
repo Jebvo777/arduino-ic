@@ -77,6 +77,7 @@ def main():
     key=uuid.uuid4().hex;created,code,_=order(a,key)
     if code!=200:raise AssertionError('Checkout failed: '+str(created))
     check(abs(float(created['total'])-57.6)<.001,'checkout creates an order using server-side group prices')
+    check(created['mail_status']=='sent','manager email receives an intact file with XLS extension')
     oid=created['id'];same,code,_=order(a,key);check(code==200 and same['id']==oid,'repeated checkout is idempotent')
     check(a.api('products/'+str(P[0]))[0]['stock']==293,'checkout reserves stock')
     admin.api('admin/orders',{'id':oid,'op':'invoice'});code,invoice,_=a.raw(f'/wp-admin/admin-post.php?action=mik_document&kind=invoice&id={oid}');check(code==200 and 'ООО Тест'.encode() in invoice and 'MIK-'.encode() in invoice,'invoice is available to its customer and contains billing')
