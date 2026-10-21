@@ -57,3 +57,36 @@ jobs:
       - name: Windows PowerShell 5.1 packaging test
         shell: powershell
         run: ./tests/windows-packager.ps1
+
+  package:
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[release]')
+    needs: [wordpress, windows-packager]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Build and verify installation ZIP
+        run: |
+          python3 tools/build.py
+          python3 - <<'PY'
+          import zipfile, pathlib, hashlib
+          p = pathlib.Path('dist/mik-shop-1.0.0.zip')
+          with zipfile.ZipFile(p) as z:
+              assert z.testzip() is None, 'ZIP CRC failed'
+              assert 'mik-shop/mik-shop.php' in z.namelist()
+              assert all(n.startswith('mik-shop/') for n in z.namelist())
+              assert not any('/tests/' in n or '/data/' in n or '/.runtime/' in n for n in z.namelist())
+              print('INSTALLATION ZIP VERIFIED:', len(z.namelist()), 'files')
+          p.with_suffix('.sha256').write_text(hashlib.sha256(p.read_bytes()).hexdigest() + '  ' + p.name + '\n')
+          PY
+      - name: Publish installation archive
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view v1.0.0 >/dev/null 2>&1; then
+            gh release upload v1.0.0 dist/mik-shop-1.0.0.zip dist/mik-shop-1.0.0.sha256 --clobber
+          else
+            gh release create v1.0.0 dist/mik-shop-1.0.0.zip dist/mik-shop-1.0.0.sha256 --target "$GITHUB_SHA" --title 'MIK Shop 1.0.0' --notes-file docs/RELEASE.md
+          fi
