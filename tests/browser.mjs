@@ -14,7 +14,7 @@ const browser=await chromium.launch({headless:true,...(exists?{executablePath:ch
 const page=await browser.newPage({viewport:{width:1440,height:1100},deviceScaleFactor:1});
 const errors=[];page.on('pageerror',e=>errors.push(e.message));
 const base='http://127.0.0.1:8095';
-const wait=async()=>{await page.locator('.mik-loading').waitFor({state:'detached',timeout:30000}).catch(()=>{});};
+const wait=async()=>{await page.waitForFunction(()=>!document.querySelector('.mik-loading'),{timeout:30000});};
 try{
   await page.goto(base+'/mik-preview/');await page.locator('.mik-carousel .mik-card').first().waitFor({timeout:30000});
   check(await page.locator('.mik-slider .mik-slide.is-active').count()===1,'slider starts with exactly one active banner');
@@ -51,4 +51,4 @@ try{
   check(errors.length===0,'storefront has no uncaught JavaScript errors');
   await fs.writeFile(path.join(rt,'browser-results.json'),JSON.stringify({count:checks.length,passed:checks,errors},null,2));
   process.stdout.write('BROWSER CHECKS PASSED: '+checks.length+'\n');
-}finally{await browser.close();}
+}catch(e){await page.screenshot({path:path.join(rt,'browser-failure.png'),fullPage:true}).catch(()=>{});await fs.writeFile(path.join(rt,'browser-failure.html'),await page.content()).catch(()=>{});throw e;}finally{await browser.close();}

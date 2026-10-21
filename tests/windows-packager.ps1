@@ -22,3 +22,12 @@ try {
     if ($m.files.'fixture/image.webp'.sha256 -ne $hash) { throw 'SHA-256 mismatch.' }
 } finally { $zip.Dispose() }
 Write-Host 'WINDOWS PACKAGER PASSED: ZIP entries, manifest, SHA-256, paths.'
+$batBase = Join-Path $env:RUNNER_TEMP 'mik bat test with spaces'
+[IO.Directory]::CreateDirectory($batBase) | Out-Null
+Copy-Item -LiteralPath (Join-Path $base 'full') -Destination $batBase -Recurse -Force
+Copy-Item -LiteralPath (Join-Path $repo 'tests/fixtures/packager-template.bat') -Destination (Join-Path $batBase 'build-packages.bat') -Force
+Push-Location -LiteralPath $batBase
+try { & cmd.exe /d /c 'call build-packages.bat'; if ($LASTEXITCODE -ne 0) { throw 'BAT loader failed.' } }
+finally { Pop-Location }
+if (-not (Test-Path -LiteralPath (Join-Path $batBase 'mik-packages-99/mik-99-0001.zip'))) { throw 'BAT did not produce a ZIP.' }
+Write-Host 'WINDOWS BAT LOADER PASSED: encoded loader, GZip JSON plan, path with spaces.'
