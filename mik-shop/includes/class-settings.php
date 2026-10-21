@@ -11,22 +11,19 @@ class Settings {
             'pickup'=>true, 'pickup_address'=>'Адрес самовывоза уточняется у менеджера',
             'guest_prices'=>true, 'currency'=>'RUB', 'usd_rate'=>0, 'tax_label'=>'Без НДС',
             'cart_slug'=>'cart-mik', 'wishlist_slug'=>'wishlist-mik', 'account_slug'=>'lk-mik', 'shop_slug'=>'shop',
+            'company_slug'=>'about-mik','purchase_slug'=>'how-mik','payment_slug'=>'payment-mik','delivery_slug'=>'delivery-mik','wholesale_slug'=>'opt-mik','business_slug'=>'yur-mik','help_slug'=>'help-mik','legal_slug'=>'pravo-mik','contacts_slug'=>'contacts-mik',
+            'logo_url'=>'','logo_dark_url'=>'',
+            'footer'=>['description'=>'Электронные компоненты для ремонта, разработки и производства.','copyright'=>'Интернет-магазин электронных компонентов.','category_limit'=>8,'category_ids'=>[]],
             'per_page'=>24, 'seller'=>['name'=>'','inn'=>'','kpp'=>'','address'=>'','bank'=>'','bik'=>'','account'=>'','correspondent'=>''],
             'colors'=>['background'=>'#F2F4F7','heading'=>'#242A33','text'=>'#454D59','muted'=>'#657080','accent'=>'#F85F03','secondary'=>'#02ADB3'],
             'heading_font'=>'Manrope', 'body_font'=>'Inter', 'load_fonts'=>true,
-            'labels'=>['cart'=>'Корзина','wishlist'=>'Избранное','account'=>'Личный кабинет','catalog'=>'Каталог','search'=>'Поиск по маркировке, коду или названию','order_success'=>'Спасибо за заказ. Наш менеджер свяжется с вами.'],
+            'labels'=>['cart'=>'Корзина','wishlist'=>'Избранное','account'=>'Личный кабинет','catalog'=>'Каталог','search'=>'Маркировка, артикул или название','order_success'=>'Спасибо за заказ. Наш менеджер свяжется с вами.'],
             'slides'=>[
-                ['title'=>'Выгодные цены на электронные компоненты','text'=>'Комплектуйте заказ для ремонта, разработки и производства. Смотрите специальные предложения и цены для постоянных покупателей.','image'=>'','local_image'=>'slider-components.webp','button'=>'Выбрать компоненты','url'=>'/shop/','secondary'=>'Оптовым покупателям','secondary_url'=>'/wholesale-mik/','color'=>'#F85F03'],
-                ['title'=>'Доставка СДЭК по России','text'=>'Получайте электронные компоненты в пункте выдачи или курьером. Менеджер согласует стоимость и срок отправки.','image'=>'','local_image'=>'slider-delivery.webp','button'=>'О доставке','url'=>'/purchase-mik/','secondary'=>'В каталог','secondary_url'=>'/shop/','color'=>'#02ADB3'],
+                ['title'=>'Выгодные цены на электронные компоненты','text'=>'Комплектуйте заказ для ремонта, разработки и производства. Смотрите специальные предложения и цены для постоянных покупателей.','image'=>'','local_image'=>'slider-components.webp','button'=>'Выбрать компоненты','url'=>'/shop/','secondary'=>'Оптовым покупателям','secondary_url'=>'/opt-mik/','color'=>'#F85F03'],
+                ['title'=>'Доставка СДЭК по России','text'=>'Получайте электронные компоненты в пункте выдачи или курьером. Менеджер согласует стоимость и срок отправки.','image'=>'','local_image'=>'slider-delivery.webp','button'=>'О доставке','url'=>'/delivery-mik/','secondary'=>'В каталог','secondary_url'=>'/shop/','color'=>'#02ADB3'],
                 ['title'=>'Не подходит СДЭК? Найдите товар на Ozon','text'=>'Часть ассортимента можно заказать на Ozon. Ищите нужную позицию по маркировке и выбирайте удобный способ получения.','image'=>'','local_image'=>'slider-marketplace.webp','button'=>'Открыть Ozon','url'=>'https://www.ozon.ru/search/?text=электронные+компоненты','secondary'=>'Выбрать компонент','secondary_url'=>'/shop/','color'=>'#005BFF'],
             ],
-            'pages'=>[
-                'wholesale'=>['title'=>'Оптовым покупателям','content'=>'<h2>Персональные условия для постоянных клиентов</h2><p>Зарегистрируйтесь, заполните профиль и отправьте заявку постоянного покупателя. Менеджер назначит вашу ценовую группу. После входа вы сможете скачать свой прайс и сформировать заказ.</p>'],
-                'purchase'=>['title'=>'Информация о покупке','content'=>'<h2>Как оформить заказ</h2><p>Найдите компоненты, добавьте нужное количество в корзину, заполните данные и отправьте заказ. Менеджер подтвердит наличие, стоимость доставки и способ оплаты.</p><h2>Оплата и доставка</h2><p>Т-Банк и СДЭК пока работают в режиме заявки. Онлайн-списание средств не производится. Доступен самовывоз, если он включён в настройках магазина.</p>'],
-                'company'=>['title'=>'Информация о компании','content'=>'<p>Интернет-магазин электронных компонентов для ремонта, разработки и производства. Основное направление — микросхемы, транзисторы, диоды и комплектующие.</p>'],
-                'contacts'=>['title'=>'Контакты','content'=>'<p>Свяжитесь с магазином в рабочее время. Контактные данные указаны ниже.</p>'],
-                'legal'=>['title'=>'Правовая информация','content'=>'<p>Владелец магазина заполняет здесь условия продажи, реквизиты и политику обработки персональных данных до начала приёма заказов.</p>'],
-            ],
+            'pages'=>Layout::page_defaults(),
             'carousel'=>['title'=>'Хиты продаж','limit'=>12,'columns'=>4,'source'=>'featured'],
             'blocks'=>[],
         ];
@@ -34,17 +31,33 @@ class Settings {
     public static function all(): array {
         $saved=(array)get_option('mik_settings',[]);$all=array_replace_recursive(self::defaults(),$saved);
         foreach(['days','slides'] as $key){if(array_key_exists($key,$saved)){$all[$key]=array_values((array)$saved[$key]);}}
+        foreach((array)($saved['pages']??[]) as $kind=>$page){foreach(['cards','steps','faq'] as $list){if(array_key_exists($list,$page)){$all['pages'][$kind][$list]=array_values((array)$page[$list]);}}}
+        if(isset($saved['footer']['category_ids'])){$all['footer']['category_ids']=array_values((array)$saved['footer']['category_ids']);}
         return $all;
     }
     public static function get(string $key, $fallback=null) { return self::all()[$key] ?? $fallback; }
-    public static function url(string $kind): string { return home_url('/'. trim((string)self::get($kind.'_slug',$kind.'-mik'),'/').'/'); }
+    public static function url(string $kind): string { return home_url('/'.trim((string)self::get($kind.'_slug',$kind.'-mik'),'/').'/'); }
+    public static function navigation(): array {
+        $names=['shop'=>'Каталог','company'=>'О компании','purchase'=>'Как купить','payment'=>'Оплата','delivery'=>'Доставка','wholesale'=>'Оптовым покупателям','business'=>'Юридическим лицам','help'=>'Помощь','legal'=>'Правовая информация','contacts'=>'Контакты','account'=>'Личный кабинет','wishlist'=>'Избранное','cart'=>'Корзина'];$out=[];
+        foreach($names as $kind=>$title){$title=self::get('pages')[$kind]['title']??$title;$out[$kind]=['title'=>$title,'url'=>self::url($kind)];}return $out;
+    }
+    public static function upgrade(): void {
+        if(get_option('mik_ui_version')==='1.1.0'){return;}$s=(array)get_option('mik_settings',[]);
+        if(($s['labels']['search']??'')==='Поиск по маркировке, коду или названию'){$s['labels']['search']='Маркировка, артикул или название';}
+        foreach((array)($s['pages']??[]) as $key=>$page){$html=$page['content']??'';
+            $factory=($key==='wholesale'&&$html==='<h2>Персональные условия для постоянных клиентов</h2><p>Зарегистрируйтесь, заполните профиль и отправьте заявку постоянного покупателя. Менеджер назначит вашу ценовую группу. После входа вы сможете скачать свой прайс и сформировать заказ.</p>')||($key==='purchase'&&$html==='<h2>Как оформить заказ</h2><p>Найдите компоненты, добавьте нужное количество в корзину, заполните данные и отправьте заказ. Менеджер подтвердит наличие, стоимость доставки и способ оплаты.</p><h2>Оплата и доставка</h2><p>Т-Банк и СДЭК пока работают в режиме заявки. Онлайн-списание средств не производится. Доступен самовывоз, если он включён в настройках магазина.</p>')||($key==='company'&&$html==='<p>Интернет-магазин электронных компонентов для ремонта, разработки и производства. Основное направление — микросхемы, транзисторы, диоды и комплектующие.</p>')||($key==='contacts'&&$html==='<p>Свяжитесь с магазином в рабочее время. Контактные данные указаны ниже.</p>')||($key==='legal'&&$html==='<p>Владелец магазина заполняет здесь условия продажи, реквизиты и политику обработки персональных данных до начала приёма заказов.</p>');
+            if($factory){$s['pages'][$key]['content']='';}if($key==='purchase'&&($page['title']??'')==='Информация о покупке'){$s['pages'][$key]['title']='Как купить';}if($key==='company'&&($page['title']??'')==='Информация о компании'){$s['pages'][$key]['title']='О компании';}
+        }
+        foreach((array)($s['slides']??[]) as $i=>$slide){foreach(['url','secondary_url'] as $key){$old=$slide[$key]??'';if($old==='/wholesale-mik/'){$s['slides'][$i][$key]='/opt-mik/';}if($old==='/purchase-mik/'){$s['slides'][$i][$key]='/delivery-mik/';}}}
+        update_option('mik_settings',$s,false);update_option('mik_ui_version','1.1.0',false);
+    }
     public static function save(array $in): void {
         $clean=self::all();
         foreach (['store_name','phone','hours_label','pickup_address','tax_label','heading_font','body_font'] as $key) {
             if (isset($in[$key])) { $clean[$key]=sanitize_text_field($in[$key]); }
         }
-        foreach (['cart','wishlist','account','shop'] as $type) { if(isset($in[$type.'_slug'])){$clean[$type.'_slug']=sanitize_title($in[$type.'_slug']);} }
-        foreach (['telegram','ozon_store'] as $key) { if(isset($in[$key])){$clean[$key]=esc_url_raw($in[$key],['https','http']);} }
+        foreach (['cart','wishlist','account','shop','company','purchase','payment','delivery','wholesale','business','help','legal','contacts'] as $type) { if(isset($in[$type.'_slug'])){$clean[$type.'_slug']=sanitize_title($in[$type.'_slug']);} }
+        foreach (['telegram','ozon_store','logo_url','logo_dark_url'] as $key) { if(isset($in[$key])){$clean[$key]=esc_url_raw($in[$key],['https','http']);} }
         if(isset($in['email'])){$clean['email']=sanitize_email($in['email']);}
         foreach (['pickup','guest_prices','load_fonts'] as $key) { if(array_key_exists($key,$in)){$clean[$key]=(bool)$in[$key];} }
         if(isset($in['days'])){$clean['days']=array_values(array_filter(array_map('intval',(array)$in['days']),fn($v)=>$v>=1&&$v<=7));}
@@ -55,7 +68,16 @@ class Settings {
         foreach ((array)($in['seller']??[]) as $k=>$v) { if(array_key_exists($k,$clean['seller'])){$clean['seller'][$k]=sanitize_text_field($v);} }
         foreach ((array)($in['colors']??[]) as $k=>$v) { if(array_key_exists($k,$clean['colors'])&&sanitize_hex_color($v)){$clean['colors'][$k]=sanitize_hex_color($v);} }
         foreach ((array)($in['labels']??[]) as $k=>$v) { if(array_key_exists($k,$clean['labels'])){$clean['labels'][$k]=sanitize_text_field($v);} }
-        foreach ((array)($in['pages']??[]) as $k=>$v) { if(isset($clean['pages'][$k])){$clean['pages'][$k]=['title'=>sanitize_text_field($v['title']??''),'content'=>wp_kses_post($v['content']??'')];} }
+        if(isset($in['footer'])){$f=(array)$in['footer'];foreach(['description','copyright'] as $key){if(isset($f[$key])){$clean['footer'][$key]=sanitize_text_field($f[$key]);}}$clean['footer']['category_limit']=max(4,min(12,(int)($f['category_limit']??8)));$ids=is_array($f['category_ids']??null)?$f['category_ids']:explode(',',(string)($f['category_ids']??''));$clean['footer']['category_ids']=array_values(array_filter(array_map('absint',$ids)));}
+        foreach((array)($in['pages']??[]) as $key=>$page){
+            if(!isset($clean['pages'][$key])){continue;}$p=$clean['pages'][$key];
+            foreach(['title','eyebrow','lead','note','cta_title','cta_text','cta_label'] as $field){if(isset($page[$field])){$p[$field]=sanitize_text_field($page[$field]);}}
+            if(isset($page['content'])){$p['content']=wp_kses_post($page['content']);}
+            if(in_array($page['icon']??'',Layout::ICONS,true)){$p['icon']=$page['icon'];}
+            if(isset($page['cta_kind'])&&isset(self::navigation()[$page['cta_kind']])){$p['cta_kind']=$page['cta_kind'];}
+            foreach(['cards','steps','faq'] as $group){if(!array_key_exists($group,$page)){continue;}$p[$group]=[];foreach(array_slice((array)$page[$group],0,30) as $row){$r=[];$fields=$group==='cards'?['icon','title','text','kind','label']:($group==='steps'?['title','text']:['question','answer']);foreach($fields as $field){$r[$field]=sanitize_text_field($row[$field]??'');}if($group==='cards'){if(!in_array($r['icon'],Layout::ICONS,true)){$r['icon']='chip';}if($r['kind']&&!isset(self::navigation()[$r['kind']])){$r['kind']='';}}if(trim($r[$group==='faq'?'question':'title'])!==''){$p[$group][]=$r;}}}
+            $clean['pages'][$key]=$p;
+        }
         if(isset($in['slides'])) {
             $clean['slides']=[];
             foreach(array_slice((array)$in['slides'],0,10) as $slide){

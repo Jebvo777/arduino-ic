@@ -57,10 +57,10 @@
   }
   const field = (name,label,value='',type='text',required=false) => `<label class="mik-field"><span>${esc(label)}${required?' *':''}</span><input name="${esc(name)}" type="${type}" value="${esc(value)}" ${required?'required':''} ${type==='password'?'minlength="12" autocomplete="new-password"':''}></label>`;
   const billingFields = (b={}) => `<div class="mik-billing mik-form-grid">${[['company','Организация'],['inn','ИНН'],['kpp','КПП'],['ogrn','ОГРН / ОГРНИП'],['legal_address','Юридический адрес'],['bank','Банк'],['bik','БИК'],['account','Расчётный счёт'],['correspondent','Корреспондентский счёт']].map(([k,l])=>field('billing.'+k,l,b[k]||'')).join('')}</div>`;
-  function widgetOpen(r, open) {const panel=$('.mik-popover',r),button=$('[data-popover]',r);if(panel){panel.hidden=!open;button?.setAttribute('aria-expanded',String(open));}}
+  function widgetOpen(r, open) {if(open)closePanels(r);const panel=$('.mik-popover',r),button=$('[data-popover]',r);if(panel){panel.hidden=!open;button?.setAttribute('aria-expanded',String(open));}}
   function renderWidget(r,type) {
     if(!state)return;
-    if(type==='store-status') {const h=state.hours;r.innerHTML=`<div class="mik-store"><span class="mik-store-indicator ${h.open?'is-open':''}"></span><div><strong>${esc(h.status)}</strong><span>${esc(h.hours)}</span>${h.open?`<a href="tel:${esc(h.phone_raw)}">${esc(h.phone)}</a>`:''}</div></div>`;return;}
+    if(type==='store-status') {const h=state.hours;r.innerHTML=`<div class="mik-store" aria-live="polite"><strong class="mik-store-status"><i class="mik-store-indicator ${h.open?'is-open':''}"></i>${esc(h.status)}</strong><span class="mik-store-hours">${esc(h.hours)}</span>${h.open?`<a class="mik-store-phone" href="tel:${esc(h.phone_raw)}">${esc(h.phone)}</a>`:''}</div>`;return;}
     const kind=type.split('-')[0],label=cfg.labels[kind]||kind,open=$('.mik-popover',r)?.hidden===false;
     let body='',count=0;
     if(kind==='account'){
@@ -71,21 +71,65 @@
       if(kind==='cart'&&list.items.length)body+=`<p class="mik-mini-total">Итого <strong>${esc(money(list.total,list.currency))}</strong></p>`;
       body+=`<a class="mik-btn" href="${safeUrl(cfg.urls[kind])}">Открыть ${kind==='cart'?'корзину':'избранное'}</a>`;
     }
-    r.innerHTML=`<div class="mik-header-widget"><button class="mik-header-icon" data-popover aria-haspopup="dialog" aria-expanded="${!!open}" aria-label="${esc(label)}">${icon(kind==='account'?'user':kind==='wishlist'?'heart':'cart')}<span class="mik-header-label">${esc(label)}</span>${kind!=='account'?`<b class="mik-badge">${count}</b>`:''}</button><div class="mik-popover" role="dialog" aria-label="${esc(label)}" ${!open?'hidden':''}>${body}</div></div>`;
+    r.innerHTML=`<div class="mik-header-widget"><button class="mik-header-icon" data-popover aria-haspopup="dialog" aria-expanded="${!!open}" aria-label="${esc(label)}" title="${esc(label)}">${icon(kind==='account'?'user':kind==='wishlist'?'heart':'cart')}${kind!=='account'?`<b class="mik-badge" aria-label="${count}">${count>99?'99+':count}</b>`:state.customer?'<i class="mik-account-online" aria-label="Вы вошли"></i>':''}</button><div class="mik-popover" role="dialog" aria-label="${esc(label)}" ${!open?'hidden':''}>${body}</div></div>`;
   }
   async function search(r) {
     r.innerHTML=`<form class="mik-search-form" role="search"><input type="search" name="q" aria-label="Поиск товаров" aria-autocomplete="list" aria-expanded="false" placeholder="${esc(cfg.labels.search)}" autocomplete="off"><button aria-label="Найти">${icon('search')}</button><div class="mik-search-results" role="listbox" hidden></div></form>`;
     const input=$('input',r),results=$('.mik-search-results',r);let timer,controller,serial=0;
     $('form',r).onsubmit=e=>{e.preventDefault();location.href=cfg.urls.shop+'?mik_q='+encodeURIComponent(input.value.trim());};
+    input.addEventListener('focus',()=>closePanels(r));
     input.addEventListener('input',()=>{clearTimeout(timer);controller?.abort();const seq=++serial,q=input.value.trim();if(q.length<2){results.hidden=true;input.setAttribute('aria-expanded','false');return;}
       timer=setTimeout(async()=>{controller=new AbortController();try{const data=await api('products?q='+encodeURIComponent(q)+'&limit=6',undefined,controller.signal);if(seq!==serial)return;results.innerHTML=data.items.length?data.items.map(p=>`<a role="option" href="${safeUrl(p.url)}"><img src="${safeUrl(p.image)}" alt=""><span><strong>${esc(p.name)}</strong><small>Код ${esc(p.sku)} · ${esc(price(p))}</small></span></a>`).join('')+`<a class="mik-search-all" href="${safeUrl(cfg.urls.shop+'?mik_q='+encodeURIComponent(q))}">Все результаты (${data.total})</a>`:'<p>Ничего не найдено</p>';results.hidden=false;input.setAttribute('aria-expanded','true');}catch(e){if(e.name!=='AbortError'){results.innerHTML=`<p>${esc(e.message)}</p>`;results.hidden=false;}}},250);
     });
     input.addEventListener('keydown',e=>{if(e.key==='Escape'){results.hidden=true;}if(e.key==='ArrowDown'){e.preventDefault();$('a',results)?.focus();}});
   }
+  let categoriesPromise;
+  function categoriesData() {
+    if(!categoriesPromise)categoriesPromise=api('categories').catch(e=>{categoriesPromise=null;throw e;});
+    return categoriesPromise;
+  }
+  function closePanels(except) {
+    $$('.mik-popover,.mik-megamenu,.mik-search-results').forEach(p=>{if(!except?.contains(p)){p.hidden=true;const r=p.closest('[data-mik]');if(r)$('[aria-expanded]',r)?.setAttribute('aria-expanded','false');}});
+  }
+  async function categoryBrowser(r,o={}) {
+    const cats=await categoriesData(),byId=new Map(cats.map(c=>[Number(c.id),c]));
+    const childIds=new Set(cats.map(c=>Number(c.parent))),limit=o.footer?Math.max(4,Math.min(12,Number(o.limit)||8)):20;
+    let parent=0,query='',shown=limit;
+    r.innerHTML=`<div class="mik-category-finder"><label class="mik-category-search">${icon('search',17)}<input type="search" placeholder="Найти категорию" aria-label="Поиск по категориям" autocomplete="off"></label><div class="mik-category-trail"></div><div class="mik-category-rows"></div><button class="mik-category-more" hidden type="button">Показать ещё</button><a class="mik-category-all" href="${safeUrl(cfg.urls.shop)}">Весь каталог ${icon('right',15)}</a></div>`;
+    const rows=$('.mik-category-rows',r),trail=$('.mik-category-trail',r),more=$('.mik-category-more',r),input=$('input',r);
+    function render(){
+      let items;
+      if(query){const q=query.toLocaleLowerCase('ru');items=cats.filter(c=>c.name.toLocaleLowerCase('ru').includes(q));}
+      else if(o.footer&&o.ids?.length){items=o.ids.map(id=>byId.get(Number(id))).filter(Boolean);}
+      else{items=cats.filter(c=>Number(c.parent)===parent);if(!parent&&!items.length)items=cats;}
+      const current=byId.get(parent);
+      trail.innerHTML=current&&!query?`<button type="button" data-category-parent="${Number(current.parent)}">${icon('left',15)} Назад</button><span>${esc(current.name)}</span>`:'';
+      rows.innerHTML=items.slice(0,shown).map(c=>`<div class="mik-category-row"><a href="${safeUrl(c.url)}"><span>${esc(c.name)}</span>${query&&Number(c.parent)&&byId.has(Number(c.parent))?`<small>${esc(byId.get(Number(c.parent)).name)}</small>`:''}</a>${!o.footer&&childIds.has(Number(c.id))?`<button type="button" data-category-parent="${Number(c.id)}" aria-label="Подкатегории: ${esc(c.name)}">${icon('right',17)}</button>`:''}</div>`).join('')||'<p class="mik-category-none">Категории не найдены.</p>';
+      more.hidden=o.footer&&!query||shown>=items.length;
+      more.textContent=`Показать ещё (${Math.min(limit,items.length-shown)})`;
+    }
+    input.addEventListener('input',()=>{query=input.value.trim();shown=limit;render();});
+    r.addEventListener('click',e=>{const b=e.target.closest('[data-category-parent]');if(!b)return;parent=Number(b.dataset.categoryParent);query='';input.value='';shown=limit;render();});
+    more.onclick=()=>{shown+=limit;render();};render();
+  }
   async function catalogButton(r) {
-    const cats=await api('categories');const parents=cats.filter(c=>!c.parent);
-    r.innerHTML=`<button class="mik-btn mik-catalog-toggle" aria-expanded="false" data-catalog-toggle>${icon('menu')} ${esc(cfg.labels.catalog)}</button><div class="mik-megamenu" hidden><div class="mik-category-menu">${parents.map(c=>`<section><a class="mik-menu-title" href="${safeUrl(c.url)}">${esc(c.name)}</a>${cats.filter(x=>x.parent===c.id).map(x=>`<a href="${safeUrl(x.url)}">${esc(x.name)}</a>`).join('')}</section>`).join('')}</div><a href="${safeUrl(cfg.urls.shop)}">Весь каталог</a></div>`;
-    $('[data-catalog-toggle]',r).onclick=()=>{const menu=$('.mik-megamenu',r);menu.hidden=!menu.hidden;$('[data-catalog-toggle]',r).setAttribute('aria-expanded',String(!menu.hidden));};
+    r.innerHTML=`<button class="mik-btn mik-catalog-toggle" type="button" aria-expanded="false" data-catalog-toggle>${icon('grid',19)}<span>${esc(cfg.labels.catalog)}</span><svg class="mik-catalog-chevron" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button><div class="mik-megamenu" hidden><div class="mik-megamenu-head"><strong>Каталог компонентов</strong><button type="button" class="mik-icon-btn" data-catalog-close aria-label="Закрыть каталог">${icon('close',18)}</button></div><div data-category-dropdown></div></div>`;
+    const b=$('[data-catalog-toggle]',r),panel=$('.mik-megamenu',r);let ready=false;
+    const set=open=>{if(open)closePanels(r);panel.hidden=!open;b.setAttribute('aria-expanded',String(open));};
+    b.onclick=async()=>{const open=panel.hidden;set(open);if(open&&!ready){const target=$('[data-category-dropdown]',r);target.innerHTML=loading;try{await categoryBrowser(target);ready=true;}catch(e){error(target,e);}}};
+    $('[data-catalog-close]',r).onclick=()=>{set(false);b.focus();};
+  }
+  function mobileMenu(r) {
+    const trigger=$('[data-mobile-open]',r),template=$('[data-mobile-template]',r);if(!trigger||!template)return;
+    let dialog,overflow;
+    trigger.onclick=()=>{
+      if(!dialog){dialog=template.content.firstElementChild.cloneNode(true);document.body.append(dialog);mountAll(dialog);
+        $('[data-mobile-close]',dialog).onclick=()=>dialog.close();
+        dialog.addEventListener('close',()=>{document.documentElement.style.overflow=overflow||'';trigger.setAttribute('aria-expanded','false');trigger.focus();});
+        dialog.addEventListener('click',e=>{if(e.target===dialog)dialog.close();});
+      }
+      closePanels();overflow=document.documentElement.style.overflow;document.documentElement.style.overflow='hidden';trigger.setAttribute('aria-expanded','true');dialog.showModal();$('[data-mobile-close]',dialog).focus();
+    };
   }
   function slider(r,o) {
     const slides=o.slides||[];if(!slides.length){r.innerHTML='';return;}
@@ -100,7 +144,7 @@
     $$('[data-scroll]',r).forEach(b=>b.onclick=()=>{const track=$('.mik-carousel-track',r);track.scrollBy({left:Number(b.dataset.scroll)*track.clientWidth,behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'instant':'smooth'});});
   }
   async function catalog(r,o) {
-    const qs=new URLSearchParams(location.search);const categories=await api('categories');let filters=[];
+    const qs=new URLSearchParams(location.search);const categories=await categoriesData();let filters=[];
     const p={cat:qs.get('mik_cat')||o.category||'',q:qs.get('mik_q')||'',page:Number(qs.get('mik_page'))||1,limit:o.limit||24,sort:qs.get('mik_sort')||'new',min:qs.get('mik_min')||'',max:qs.get('mik_max')||'',stock:qs.get('mik_stock')||'',param:qs.get('mik_param')||'',value:qs.get('mik_value')||''};let view=o.view||'grid';
     const showCats=!p.cat&&!p.q&&!p.stock&&!p.min&&!p.max;
     if(showCats){const top=categories.filter(c=>!c.parent);r.innerHTML=`<h1>Каталог электронных компонентов</h1><div class="mik-categories">${top.map(c=>`<article class="mik-category-tile">${c.image?`<img src="${safeUrl(c.image)}" alt="" loading="lazy">`:''}<a class="mik-category-title" href="${safeUrl(c.url)}">${esc(c.name)}</a><p>${categories.filter(x=>x.parent===c.id).slice(0,6).map(x=>`<a href="${safeUrl(x.url)}">${esc(x.name)}</a>`).join(' · ')}</p><a class="mik-btn mik-btn-secondary" href="${safeUrl(c.url)}">Подробнее</a></article>`).join('')||empty('Категории появятся после импорта.',false)}</div>`;return;}
@@ -156,7 +200,7 @@
   async function mount(r) {
     if(r._mikMounted)return;r._mikMounted=true;roots.add(r);const type=r.dataset.mik;let o={};try{o=JSON.parse(r.dataset.options||'{}');}catch{}
     try {
-      if(type==='static'){mountAll(r);return;}if(type==='slider'){slider(r,o);return;}
+      if(type==='static'){mountAll(r);return;}if(type==='slider'){slider(r,o);return;}if(type==='mobile-menu'){mobileMenu(r);return;}if(type==='category-browser'){await categoryBrowser(r,o);return;}if(type==='footer-categories'){await categoryBrowser(r,{...o,footer:true});return;}if(type==='catalog-button'){await catalogButton(r);return;}
       await statePromise;
       if(['cart-icon','wishlist-icon','account-icon','store-status'].includes(type)){renderWidget(r,type);return;}
       const fn={search, 'catalog-button':catalogButton,carousel,catalog,product,cart,wishlist,account}[type];if(fn)await fn(r,o);

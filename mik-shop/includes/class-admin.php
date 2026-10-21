@@ -80,7 +80,8 @@ class Admin {
         throw new \InvalidArgumentException('Неизвестное действие администратора.');
     }
     private static function create_pages(): array {
-        $list=[Settings::get('shop_slug')=>['Каталог','[mik_catalog]'],Settings::get('cart_slug')=>['Корзина','[mik_cart]'],Settings::get('wishlist_slug')=>['Избранное','[mik_wishlist]'],Settings::get('account_slug')=>['Личный кабинет','[mik_account]'],'wholesale-mik'=>['Оптовым покупателям','[mik_wholesale]'],'purchase-mik'=>['Информация о покупке','[mik_purchase_info]'],'company-mik'=>['Информация о компании','[mik_company_info]'],'contacts-mik'=>['Контакты','[mik_contacts]'],'legal-mik'=>['Правовая информация','[mik_legal]']];$out=[];
+        $codes=['shop'=>['Каталог','mik_catalog'],'cart'=>['Корзина','mik_cart'],'wishlist'=>['Избранное','mik_wishlist'],'account'=>['Личный кабинет','mik_account'],'wholesale'=>['Оптовым покупателям','mik_wholesale'],'purchase'=>['Как купить','mik_purchase_info'],'company'=>['О компании','mik_company_info'],'contacts'=>['Контакты','mik_contacts'],'legal'=>['Правовая информация','mik_legal'],'business'=>['Юридическим лицам','mik_legal_entities'],'payment'=>['Оплата','mik_payment'],'delivery'=>['Доставка','mik_delivery'],'help'=>['Помощь','mik_help']];$list=[];$out=[];
+        foreach($codes as $kind=>[$title,$code]){$list[Settings::get($kind.'_slug')]=[$title,'['.$code.']'];}
         foreach($list as $slug=>[$title,$code]){$page=get_page_by_path($slug);if(!$page){$id=wp_insert_post(['post_type'=>'page','post_status'=>'publish','post_title'=>$title,'post_name'=>$slug,'post_content'=>$code],true);if(is_wp_error($id)){throw new \RuntimeException($id->get_error_message());}}else{$id=$page->ID;}$out[]=['title'=>$title,'url'=>get_permalink($id),'existing'=>(bool)$page];if($slug===Settings::get('shop_slug')&&!get_option('woocommerce_shop_page_id')){update_option('woocommerce_shop_page_id',$id);}}
         return $out;
     }

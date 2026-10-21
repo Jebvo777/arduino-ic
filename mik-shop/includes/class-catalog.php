@@ -85,7 +85,7 @@ class Catalog {
         return ['items'=>array_values(array_filter(array_map(fn($id)=>self::product((int)$id),$ids))),'total'=>$total,'page'=>$page,'pages'=>(int)ceil($total/$limit),'group'=>Auth::customer()?$g['name']:null,'currency'=>$g['currency']];
     }
     public static function categories(): array {
-        $terms=get_terms(['taxonomy'=>'product_cat','hide_empty'=>false,'number'=>500]);if(is_wp_error($terms)){return [];}
+        $terms=get_terms(['taxonomy'=>'product_cat','hide_empty'=>false,'number'=>0,'orderby'=>'name','order'=>'ASC']);if(is_wp_error($terms)){return [];}
         return array_map(function($t){$url=get_term_link($t);$image=(int)get_term_meta($t->term_id,'thumbnail_id',true);return ['id'=>$t->term_id,'parent'=>$t->parent,'name'=>$t->name,'slug'=>$t->slug,'count'=>$t->count,'url'=>is_wp_error($url)?Settings::url('shop'):$url,'image'=>$image?wp_get_attachment_image_url($image,'medium'):''];},$terms);
     }
     public static function filters(): array {
