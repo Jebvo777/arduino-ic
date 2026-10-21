@@ -56,7 +56,8 @@ class Commerce {
             }
             $wpdb->delete(DB::table('lists'),['owner'=>Auth::owner(),'kind'=>'cart']);return $id;
         });
-        self::notify($id);return self::order($id);
+        try { self::notify($id); } catch(\Throwable $e) { $wpdb->update(DB::table('orders'),['mail_status'=>'failed'],['id'=>$id]); }
+        return self::order($id);
     }
     public static function order(int $id,bool $admin=false): array {
         global $wpdb;$o=$wpdb->get_row($wpdb->prepare('SELECT * FROM '.DB::table('orders').' WHERE id=%d',$id),ARRAY_A);

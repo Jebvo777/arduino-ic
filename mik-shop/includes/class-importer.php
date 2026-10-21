@@ -81,12 +81,14 @@ class Importer {
     public static function status(int $id): array {
         global $wpdb;if(!$id){return ['jobs'=>$wpdb->get_results('SELECT id,status,total_rows,created_at FROM '.DB::table('imports').' ORDER BY id DESC LIMIT 20',ARRAY_A)];}
         $j=$wpdb->get_row($wpdb->prepare('SELECT id,status,total_rows,plan_bytes,created_at FROM '.DB::table('imports').' WHERE id=%d',$id),ARRAY_A);if(!$j){throw new \InvalidArgumentException('Импорт не найден.');}
+        foreach(['id','total_rows','plan_bytes'] as $key){$j[$key]=(int)$j[$key];}
         $j['packages']=$wpdb->get_results($wpdb->prepare('SELECT package_no,filename,estimated_bytes,rows_count,selected,status FROM '.DB::table('packages').' WHERE import_id=%d ORDER BY package_no',$id),ARRAY_A);
+        foreach($j['packages'] as &$package){foreach(['package_no','estimated_bytes','rows_count','selected'] as $key){$package[$key]=(int)$package[$key];}}unset($package);
         $j['processed']=(int)$wpdb->get_var($wpdb->prepare('SELECT COUNT(*) FROM '.DB::table('import_rows')." WHERE import_id=%d AND status='done'",$id));
         $j['error_count']=(int)$wpdb->get_var($wpdb->prepare('SELECT COUNT(*) FROM '.DB::table('import_rows')." WHERE import_id=%d AND status='error'",$id));
         $j['errors']=$wpdb->get_results($wpdb->prepare('SELECT id,package_no,legacy_id,error FROM '.DB::table('import_rows')." WHERE import_id=%d AND error IS NOT NULL AND error<>'' ORDER BY id DESC LIMIT 100",$id),ARRAY_A);
         $pending=array_values(array_filter($j['packages'],fn($p)=>$p['selected']&&!in_array($p['status'],['done','done-errors'],true)));$j['next']=$pending[0]??null;
-        $j['bat_url']=wp_nonce_url(admin_url('admin-post.php?action=mik_document&kind=packager&id='.$id),'mik_packager');return $j;
+        $j['bat_url']=add_query_arg('_wpnonce',wp_create_nonce('mik_packager'),admin_url('admin-post.php?action=mik_document&kind=packager&id='.$id));return $j;
     }
     private static function select(int $id,array $ids): array {
         global $wpdb;$j=self::job($id);if($j['status']!=='ready'){throw new \InvalidArgumentException('Дождитесь завершения планирования.');}
@@ -103,7 +105,7 @@ class Importer {
             $plan['packages'][]=['number'=>(int)$p['package_no'],'filename'=>$p['filename'],'token'=>self::token($j,(int)$p['package_no']),'files'=>array_values($files)];
         }
         $payload=base64_encode(gzencode(DB::json($plan),9));$ps=file_get_contents(MIK_PATH.'assets/packager.ps1');
-        $loader='$self=$env:MIK_SELF; $raw=[IO.File]::ReadAllText($self); $parts=$raw -split "(?m)^::MIK_DATA\\r?$",2; $bytes=[Convert]::FromBase64String($parts[1].Trim()); $ms=New-Object IO.MemoryStream(,$bytes); $gz=New-Object IO.Compression.GzipStream($ms,[IO.Compression.CompressionMode]::Decompress); $reader=New-Object IO.StreamReader($gz,[Text.Encoding]::UTF8); $plan=$reader.ReadToEnd() | ConvertFrom-Json; $script=$raw -split "(?m)^::MIK_PS\\r?$",2; $body=($script[1] -split "(?m)^::MIK_DATA\\r?$",2)[0]; & ([ScriptBlock]::Create($body)) $plan (Split-Path -LiteralPath $self -Parent)';
+        $loader='$self=$env:MIK_SELF; $raw=[IO.File]::ReadAllText($self); $parts=$raw -split "(?m)^::MIK_DATA\\r?$",2; $bytes=[Convert]::FromBase64String($parts[1].Trim()); $ms=New-Object IO.MemoryStream(,$bytes); $gz=New-Object IO.Compression.GzipStream($ms,[IO.Compression.CompressionMode]::Decompress); $reader=New-Object IO.StreamReader($gz,[Text.Encoding]::UTF8); $plan=$reader.ReadToEnd() | ConvertFrom-Json; $script=$raw -split "(?m)^::MIK_PS\\r?$",2; $body=($script[1] -split "(?m)^::MIK_DATA\\r?$",2)[0]; & ([ScriptBlock]::Create($body)) $plan ([IO.Path]::GetDirectoryName($self))';
         $encoded=base64_encode(mb_convert_encoding($loader,'UTF-16LE','UTF-8'));
         return "@echo off\r\nsetlocal DisableDelayedExpansion\r\nset \"MIK_SELF=%~f0\"\r\npowershell.exe -NoLogo -NoProfile -EncodedCommand $encoded\r\nset \"MIK_EXIT=%ERRORLEVEL%\"\r\npause\r\nexit /b %MIK_EXIT%\r\n::MIK_PS\r\n".str_replace("\n","\r\n",$ps)."\r\n::MIK_DATA\r\n".$payload."\r\n";
     }

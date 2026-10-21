@@ -31,7 +31,11 @@ class Settings {
             'blocks'=>[],
         ];
     }
-    public static function all(): array { return array_replace_recursive(self::defaults(), (array)get_option('mik_settings', [])); }
+    public static function all(): array {
+        $saved=(array)get_option('mik_settings',[]);$all=array_replace_recursive(self::defaults(),$saved);
+        foreach(['days','slides'] as $key){if(array_key_exists($key,$saved)){$all[$key]=array_values((array)$saved[$key]);}}
+        return $all;
+    }
     public static function get(string $key, $fallback=null) { return self::all()[$key] ?? $fallback; }
     public static function url(string $kind): string { return home_url('/'. trim((string)self::get($kind.'_slug',$kind.'-mik'),'/').'/'); }
     public static function save(array $in): void {

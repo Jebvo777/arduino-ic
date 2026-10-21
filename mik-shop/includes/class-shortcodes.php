@@ -35,7 +35,7 @@ class Shortcodes {
             $content.='</article>';$type='static';
         }
         $prefix=(!empty($intro['title'])?'<h2 class="mik-block-title">'.esc_html($intro['title']).'</h2>':'').(!empty($intro['text'])?'<div class="mik-block-intro">'.wp_kses_post($intro['text']).'</div>':'');
-        return '<div class="mik mik-'.esc_attr($type).'" data-mik="'.esc_attr($type).'" data-options="'.esc_attr(DB::json($attrs)).'">'.$prefix.$content.(in_array($type,['static','slider'],true)?'':'<span class="mik-loading" role="status">Загрузка…</span>').'</div>';
+        return '<div class="mik mik-'.esc_attr($type).'">'.$prefix.'<div data-mik="'.esc_attr($type).'" data-options="'.esc_attr(DB::json($attrs)).'">'.$content.(in_array($type,['static','slider'],true)?'':'<span class="mik-loading" role="status">Загрузка…</span>').'</div></div>';
     }
     private static function link(string $url): string { return str_starts_with($url,'/')?home_url($url):$url; }
 }
