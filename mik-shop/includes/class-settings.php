@@ -16,9 +16,9 @@ class Settings {
             'heading_font'=>'Manrope', 'body_font'=>'Inter', 'load_fonts'=>true,
             'labels'=>['cart'=>'Корзина','wishlist'=>'Избранное','account'=>'Личный кабинет','catalog'=>'Каталог','search'=>'Поиск по маркировке, коду или названию','order_success'=>'Спасибо за заказ. Наш менеджер свяжется с вами.'],
             'slides'=>[
-                ['title'=>'Выгодные цены на электронные компоненты','text'=>'Комплектуйте заказ для ремонта, разработки и производства. Смотрите специальные предложения и цены для постоянных покупателей.','image'=>'','local_image'=>'slider-components.png','button'=>'Выбрать компоненты','url'=>'/shop/','secondary'=>'Оптовым покупателям','secondary_url'=>'/wholesale-mik/','color'=>'#F85F03'],
-                ['title'=>'Доставка СДЭК по России','text'=>'Получайте электронные компоненты в пункте выдачи или курьером. Менеджер согласует стоимость и срок отправки.','image'=>'','local_image'=>'slider-delivery.png','button'=>'О доставке','url'=>'/purchase-mik/','secondary'=>'В каталог','secondary_url'=>'/shop/','color'=>'#02ADB3'],
-                ['title'=>'Не подходит СДЭК? Найдите товар на Ozon','text'=>'Часть ассортимента можно заказать на Ozon. Ищите нужную позицию по маркировке и выбирайте удобный способ получения.','image'=>'','local_image'=>'slider-marketplace.png','button'=>'Открыть Ozon','url'=>'https://www.ozon.ru/search/?text=электронные+компоненты','secondary'=>'Выбрать компонент','secondary_url'=>'/shop/','color'=>'#005BFF'],
+                ['title'=>'Выгодные цены на электронные компоненты','text'=>'Комплектуйте заказ для ремонта, разработки и производства. Смотрите специальные предложения и цены для постоянных покупателей.','image'=>'','local_image'=>'slider-components.webp','button'=>'Выбрать компоненты','url'=>'/shop/','secondary'=>'Оптовым покупателям','secondary_url'=>'/wholesale-mik/','color'=>'#F85F03'],
+                ['title'=>'Доставка СДЭК по России','text'=>'Получайте электронные компоненты в пункте выдачи или курьером. Менеджер согласует стоимость и срок отправки.','image'=>'','local_image'=>'slider-delivery.webp','button'=>'О доставке','url'=>'/purchase-mik/','secondary'=>'В каталог','secondary_url'=>'/shop/','color'=>'#02ADB3'],
+                ['title'=>'Не подходит СДЭК? Найдите товар на Ozon','text'=>'Часть ассортимента можно заказать на Ozon. Ищите нужную позицию по маркировке и выбирайте удобный способ получения.','image'=>'','local_image'=>'slider-marketplace.webp','button'=>'Открыть Ozon','url'=>'https://www.ozon.ru/search/?text=электронные+компоненты','secondary'=>'Выбрать компонент','secondary_url'=>'/shop/','color'=>'#005BFF'],
             ],
             'pages'=>[
                 'wholesale'=>['title'=>'Оптовым покупателям','content'=>'<h2>Персональные условия для постоянных клиентов</h2><p>Зарегистрируйтесь, заполните профиль и отправьте заявку постоянного покупателя. Менеджер назначит вашу ценовую группу. После входа вы сможете скачать свой прайс и сформировать заказ.</p>'],
@@ -28,6 +28,7 @@ class Settings {
                 'legal'=>['title'=>'Правовая информация','content'=>'<p>Владелец магазина заполняет здесь условия продажи, реквизиты и политику обработки персональных данных до начала приёма заказов.</p>'],
             ],
             'carousel'=>['title'=>'Хиты продаж','limit'=>12,'columns'=>4,'source'=>'featured'],
+            'blocks'=>[],
         ];
     }
     public static function all(): array { return array_replace_recursive(self::defaults(), (array)get_option('mik_settings', [])); }
@@ -57,11 +58,12 @@ class Settings {
                 $s=[];foreach(['title','text','button','secondary'] as $k){$s[$k]=sanitize_text_field($slide[$k]??'');}
                 foreach(['image','url','secondary_url'] as $k){$s[$k]=esc_url_raw($slide[$k]??'',['http','https']);}
                 $s['color']=sanitize_hex_color($slide['color']??'')?:'#F85F03';
-                $s['local_image']=in_array($slide['local_image']??'',['slider-components.png','slider-delivery.png','slider-marketplace.png'],true)?$slide['local_image']:'';
+                $s['local_image']=in_array($slide['local_image']??'',['slider-components.webp','slider-delivery.webp','slider-marketplace.webp'],true)?$slide['local_image']:'';
                 $clean['slides'][]=$s;
             }
         }
         if(isset($in['carousel'])){$clean['carousel']=['title'=>sanitize_text_field($in['carousel']['title']??''),'limit'=>max(4,min(40,(int)($in['carousel']['limit']??12))),'columns'=>max(1,min(6,(int)($in['carousel']['columns']??4))),'source'=>in_array($in['carousel']['source']??'',['featured','new','all'],true)?$in['carousel']['source']:'featured'];}
+        if(isset($in['blocks'])&&is_array($in['blocks'])){foreach($in['blocks'] as $k=>$block){if(in_array($k,array_values(Shortcodes::MAP),true)){$clean['blocks'][$k]=['title'=>sanitize_text_field($block['title']??''),'text'=>wp_kses_post($block['text']??'')];}}}
         update_option('mik_settings',$clean,false);
     }
     public static function hours(): array {

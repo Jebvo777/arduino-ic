@@ -41,12 +41,14 @@ class Catalog {
         global $wpdb;return $wpdb->get_results($wpdb->prepare('SELECT param_key,label,value,unit FROM '.DB::table('specs').' WHERE product_id=%d ORDER BY sort,param_key',$id),ARRAY_A)?:[];
     }
     public static function set_specs(int $id,array $specs): void {
-        global $wpdb;$wpdb->delete(DB::table('specs'),['product_id'=>$id]);$i=0;
+        global $wpdb;$wpdb->delete(DB::table('specs'),['product_id'=>$id]);$i=0;$defs=(array)get_option('mik_parameters',[]);$known=array_column($defs,'key');$changed=false;
         foreach(array_slice($specs,0,80) as $s){
-            $label=sanitize_text_field($s['label']??'');$val=sanitize_text_field($s['value']??'');if($label===''||$val===''){continue;}
+            $label=mb_substr(sanitize_text_field($s['label']??''),0,190);$val=sanitize_text_field($s['value']??'');if($label===''||$val===''){continue;}
             $key=sanitize_key($s['param_key']??'');if(!$key){$key='p_'.substr(md5($label),0,16);}
             $wpdb->replace(DB::table('specs'),['product_id'=>$id,'param_key'=>$key,'label'=>$label,'value'=>mb_substr($val,0,190),'unit'=>mb_substr(sanitize_text_field($s['unit']??''),0,30),'sort'=>$i++]);
+            if(!in_array($key,$known,true)&&count($defs)<200){$defs[]=['key'=>$key,'label'=>$label,'unit'=>mb_substr(sanitize_text_field($s['unit']??''),0,30)];$known[]=$key;$changed=true;}
         }
+        if($changed){update_option('mik_parameters',$defs,false);}
     }
     public static function product(int $id,bool $detail=false): ?array {
         $p=wc_get_product($id);if(!$p||$p->get_status()!=='publish'||!$p->is_type('simple')){return null;}
@@ -79,7 +81,7 @@ class Catalog {
         $orders=['price_asc'=>"$price IS NULL ASC,$price ASC,p.ID DESC",'price_desc'=>"$price IS NULL ASC,$price DESC,p.ID DESC",'name'=>'p.post_title ASC','new'=>'p.post_date DESC,p.ID DESC'];$order=$orders[$p['sort']??'new']??$orders['new'];
         $sql=' FROM '.$wpdb->posts.' p '.$joins.' WHERE '.implode(' AND ',$where);
         $total=(int)$wpdb->get_var('SELECT COUNT(DISTINCT p.ID)'.$sql);
-        $ids=$wpdb->get_col('SELECT DISTINCT p.ID'.$sql.' ORDER BY '.$order.' LIMIT '.(int)$limit.' OFFSET '.(($page-1)*$limit));
+        $ids=$wpdb->get_col('SELECT p.ID'.$sql.' ORDER BY '.$order.' LIMIT '.(int)$limit.' OFFSET '.(($page-1)*$limit));
         return ['items'=>array_values(array_filter(array_map(fn($id)=>self::product((int)$id),$ids))),'total'=>$total,'page'=>$page,'pages'=>(int)ceil($total/$limit),'group'=>Auth::customer()?$g['name']:null,'currency'=>$g['currency']];
     }
     public static function categories(): array {

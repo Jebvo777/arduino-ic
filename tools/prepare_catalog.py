@@ -91,12 +91,12 @@ def main():
     counts=Counter();seen=set();rows=[];missing=set();direct_ozon=0;source_rows=0
     for r in products:
         source_rows+=1
-        if len(r)<35 or not r[1] or not r[2]:continue
+        if len(r)<35 or not r[2]:continue
         r += [''] * max(0,43-len(r))
         lid,original_sku,name=r[0],r[1].strip(),plain(r[2])
         counts[original_sku]+=1
         if name.lower() in ('test1','test','тест') and r[6] in ('','0'):continue
-        sku=original_sku
+        sku=original_sku or f'legacy-{lid}'
         if sku in seen:sku=f'{sku}-L{lid}'
         seen.add(sku)
         paths=[]

@@ -18,7 +18,7 @@ class Documents {
         foreach($strings as $s){$s=mb_substr($s,0,1000);$u=self::unicode($s);$entry=pack('vC',strlen($u)/2,1).$u;if(strlen($sst)+strlen($entry)>8000){$sst_records.=self::record($sst_records===''?0x00FC:0x003C,$sst);$sst='';}$sst.=$entry;}
         $sst_records.=self::record($sst_records===''?0x00FC:0x003C,$sst);
         $global=$bof(0x0005).self::record(0x0042,pack('v',1200)).self::record(0x003D,pack('vvvvvvvvv',0,0,0x3FCF,0x2A4E,0x0038,0,0,1,600)).self::record(0x00E0,pack('vvv',0,0,0).str_repeat("\0",14)).$sst_records;
-        $sheet_name=self::unicode('Заказ');$bound_size=4+4+1+1+1+strlen($sheet_name);$offset=strlen($global)+$bound_size+4;
+        $sheet_name=self::unicode('Заказ');$bound_size=4+4+1+1+1+1+strlen($sheet_name);$offset=strlen($global)+$bound_size+4;
         $global.=self::record(0x0085,pack('VCCCC',$offset,0,0,5,1).$sheet_name).self::record(0x000A);
         $sheet=$bof(0x0010).self::record(0x0200,pack('VVvvv',0,count($rows),0,5,0));
         foreach($rows as $ri=>$row){foreach($row as $ci=>$v){$header=pack('vvv',$ri,$ci,0);$sheet.=is_string($v)?self::record(0x00FD,$header.pack('V',$ids[$v])):self::record(0x0203,$header.pack('e',(float)$v));}}
