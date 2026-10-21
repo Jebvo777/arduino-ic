@@ -22,8 +22,8 @@ foreach ($package in $Plan.packages) {
         foreach ($file in $package.files) {
             $relative = [string]$file.path
             if ($relative -match '(^|[/\\])\.\.([/\\]|$)' -or $relative -match '^[/\\]|:' -or $relative -notmatch '\.(jpg|jpeg|png|webp|gif|pdf)$') { throw ('Unsafe path: ' + $relative) }
-            $source = [IO.Path]::GetFullPath((Join-Path $root ($relative.Replace('/', '\'))))
-            if (-not $source.StartsWith($root + '\', [StringComparison]::OrdinalIgnoreCase)) { throw 'Path is outside FULL.' }
+            $source = [IO.Path]::GetFullPath((Join-Path $root ($relative.Replace('/', [IO.Path]::DirectorySeparatorChar))))
+            if (-not $source.StartsWith($root + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) { throw 'Path is outside FULL.' }
             if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
                 $manifest.missing += $relative
                 $missingAll.Add($package.filename + ': ' + $relative)

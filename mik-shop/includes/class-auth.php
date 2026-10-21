@@ -65,7 +65,7 @@ class Auth {
     }
     private static function authenticate(int $id): void {
         global $wpdb;$s=self::session();$guest='s:'.$s['id'];$target='c:'.$id;$t=DB::table('lists');
-        $wpdb->query($wpdb->prepare("INSERT INTO $t (owner,kind,product_id,qty) SELECT %s,kind,product_id,qty FROM $t WHERE owner=%s ON DUPLICATE KEY UPDATE qty=LEAST(999999,GREATEST(qty,VALUES(qty)))",$target,$guest));
+        DB::require_result($wpdb->query($wpdb->prepare("INSERT INTO $t (owner,kind,product_id,qty) SELECT %s,src.kind,src.product_id,src.qty FROM $t AS src WHERE src.owner=%s ON DUPLICATE KEY UPDATE qty=LEAST(999999,GREATEST($t.qty,VALUES(qty)))",$target,$guest)));
         $wpdb->delete($t,['owner'=>$guest]);$wpdb->delete(DB::table('sessions'),['id'=>$s['id']]);self::$session=null;self::create($id);
     }
     public static function logout(): void {

@@ -93,7 +93,7 @@ class Commerce {
         if(in_array($o['status'],['pending','confirmed'],true)){self::status($id,'invoiced');}return self::order($id,true);
     }
     public static function notify(int $id): bool {
-        global $wpdb;$o=self::order($id,true);$path=wp_tempnam('mik-order-'.$id.'.xls');
+        global $wpdb;if(!function_exists('wp_tempnam')){require_once ABSPATH.'wp-admin/includes/file.php';}$o=self::order($id,true);$path=wp_tempnam('mik-order-'.$id.'.xls');
         if(!$path){$wpdb->update(DB::table('orders'),['mail_status'=>'failed'],['id'=>$id]);return false;}
         file_put_contents($path,Documents::xls($o));
         $ok=wp_mail(Settings::get('email'),'Заказ MIK #'.$id,"Новый заказ #$id.\nПокупатель: ".$o['customer']['name']."\nEmail: ".$o['customer']['email']."\nТелефон: ".$o['customer']['phone']."\nЗаказ в приложении.\nАдминка: ".admin_url('admin.php?page=mik-shop&tab=orders'),[],[$path]);

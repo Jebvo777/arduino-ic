@@ -1,0 +1,58 @@
+name: Verify MIK Shop
+on:
+  push:
+    branches: [main]
+    paths: ['mik-shop/**', 'tests/**', 'tools/**', '.github/workflows/verify.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: mik-verification-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  wordpress:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      mariadb:
+        image: mariadb:10.11
+        env:
+          MARIADB_ROOT_PASSWORD: mik_disposable_test_password
+          MARIADB_DATABASE: mik_test
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=5s --health-timeout=5s --health-retries=20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: PHP and Node dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y php-cli php-mysql php-mbstring php-xml php-zip php-curl
+          npm install --no-save playwright@1.62.1
+          PLAYWRIGHT_BROWSERS_PATH="$PWD/.runtime/browsers" npx playwright install --with-deps chromium
+          python3 -m pip install xlrd
+      - name: WordPress, API and browser checks
+        env:
+          MIK_DB_PASSWORD: mik_disposable_test_password
+        run: bash tools/run_ci_tests.sh
+      - name: Screenshots and verification results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mik-verification
+          path: |
+            .runtime/*results.json
+            .runtime/*.png
+            .runtime/php-errors.log
+            .runtime/http.log
+            .runtime/order-test.xls
+          retention-days: 7
+  windows-packager:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Windows PowerShell 5.1 packaging test
+        shell: powershell
+        run: ./tests/windows-packager.ps1

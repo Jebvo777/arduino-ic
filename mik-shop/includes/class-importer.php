@@ -132,6 +132,7 @@ class Importer {
     }
     private static function step(int $id,int $number): array {
         global $wpdb;$j=self::job($id);$p=$wpdb->get_row($wpdb->prepare('SELECT * FROM '.DB::table('packages').' WHERE import_id=%d AND package_no=%d',$id,$number),ARRAY_A);
+        if($p&&$p['selected']&&in_array($p['status'],['done','done-errors'],true)){return self::status($id);}
         if(!$p||!$p['selected']||!in_array($p['status'],['uploaded','processing'],true)||!is_file($p['zip_path'])){throw new \InvalidArgumentException('Сначала загрузите выбранный ZIP-пакет.');}
         $z=new \ZipArchive();if($z->open($p['zip_path'])!==true){throw new \RuntimeException('Не удалось открыть пакет.');}$manifest=json_decode($z->getFromName('manifest.json'),true);
         $rows=$wpdb->get_results($wpdb->prepare('SELECT * FROM '.DB::table('import_rows')." WHERE import_id=%d AND package_no=%d AND status='pending' ORDER BY id LIMIT 8",$id,$number),ARRAY_A);$start=microtime(true);
