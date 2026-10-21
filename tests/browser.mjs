@@ -14,7 +14,7 @@ const browser=await chromium.launch({headless:true,...(exists?{executablePath:ch
 const page=await browser.newPage({viewport:{width:1440,height:1100},deviceScaleFactor:1});
 const errors=[];page.on('pageerror',e=>errors.push(e.message));
 const base='http://127.0.0.1:8095';
-const wait=async()=>{await page.waitForFunction(()=>!document.querySelector('.mik-loading'),{timeout:30000});};
+const wait=async()=>{await page.waitForFunction(()=>!document.querySelector('.mik-loading,.mik-empty[role=status]'),{timeout:30000});};
 try{
   await page.goto(base+'/mik-preview/');await page.locator('.mik-carousel .mik-card').first().waitFor({timeout:30000});
   check(await page.locator('.mik-slider .mik-slide.is-active').count()===1,'slider starts with exactly one active banner');

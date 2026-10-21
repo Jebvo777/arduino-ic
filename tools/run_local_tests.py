@@ -44,6 +44,7 @@ try:
     server=subprocess.Popen([php,'-S','127.0.0.1:8095','-t',str(wp),str(root/'tests/router.php')],cwd=root,env=serverenv,stdout=(rt/'http.log').open('w'),stderr=subprocess.STDOUT,start_new_session=True)
     time.sleep(.6)
     run([env.get('CODEX_PRIMARY_RUNTIME_PYTHON','python3'),str(root/'tests/integration.py')])
+    if env.get('MIK_TEST_FULL_CSV'):run([env.get('CODEX_PRIMARY_RUNTIME_PYTHON','python3'),str(root/'tests/full_catalog_plan.py')])
     if os.environ.get('MIK_SKIP_BROWSER')!='1':run([env.get('CODEX_PRIMARY_RUNTIME_NODE','node'),str(root/'tests/browser.mjs')])
     print('INTEGRATION RUN COMPLETE',flush=True)
 finally:

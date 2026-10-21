@@ -17,8 +17,8 @@ class Importer {
         $p=(array)($r->get_json_params()?:$r->get_params());$id=absint($p['id']??0);
         if($action==='upload'){return self::upload($r);}
         if($action==='plan'){return self::lock($id,fn()=>self::plan($id,$p));}
-        if($action==='plan-step'){return self::lock($id,fn()=>self::plan_step($id));}
-        if($action==='select'){return self::select($id,(array)($p['packages']??[]));}
+        if($action==='plan-step'){return self::lock($id,fn()=>DB::transaction(fn()=>self::plan_step($id)));}
+        if($action==='select'){return DB::transaction(fn()=>self::select($id,(array)($p['packages']??[])));}
         if($action==='step'){return self::lock($id,fn()=>self::step($id,absint($p['package']??0)));}
         if($action==='retry'){
             global $wpdb;$number=absint($p['package']??0);$wpdb->query($wpdb->prepare('UPDATE '.DB::table('import_rows')." SET status='pending',error=NULL WHERE import_id=%d AND package_no=%d AND status='error'",$id,$number));
@@ -45,7 +45,7 @@ class Importer {
             if($total>104857600){throw new \InvalidArgumentException('Каталог CSV не должен превышать 100 МБ.');}
             $existing=$wpdb->get_var($wpdb->prepare('SELECT id FROM '.DB::table('imports').' WHERE file_path=%s',$path));
             if($existing){return ['offset'=>$length,'done'=>true,'id'=>(int)$existing];}
-            $f=fopen($path,'rb');$headers=fgetcsv($f,0,';');fclose($f);if($headers){$headers[0]=preg_replace('/^\xEF\xBB\xBF/','',$headers[0]);}
+            $f=fopen($path,'rb');$headers=fgetcsv($f,0,';','"','');fclose($f);if($headers){$headers[0]=preg_replace('/^\xEF\xBB\xBF/','',$headers[0]);}
             if(!$headers||array_diff(['legacy_id','sku','name','assets_json','images_json','pdfs_json'],(array)$headers)){throw new \InvalidArgumentException('Используйте подготовленный catalog.csv в UTF-8 с разделителем «;».');}
             DB::require_result($wpdb->insert(DB::table('imports'),['file_path'=>$path,'headers'=>DB::json($headers),'created_at'=>DB::now(),'updated_at'=>DB::now()]));return ['offset'=>$length,'done'=>true,'id'=>(int)$wpdb->insert_id];
         }
@@ -56,14 +56,14 @@ class Importer {
     }
     private static function plan(int $id,array $p): array {
         global $wpdb;$j=self::job($id);if($j['status']!=='uploaded'){throw new \InvalidArgumentException('План уже создан. Для другого размера пакетов загрузите каталог заново.');}
-        $mb=max(1,min(1024,(int)($p['mb']??50)));$f=fopen($j['file_path'],'rb');fgetcsv($f,0,';');$offset=ftell($f);fclose($f);
+        $mb=max(1,min(1024,(int)($p['mb']??50)));$f=fopen($j['file_path'],'rb');fgetcsv($f,0,';','"','');$offset=ftell($f);fclose($f);
         $wpdb->update(DB::table('imports'),['status'=>'planning','plan_bytes'=>$mb*1048576,'byte_offset'=>$offset,'current_package'=>1,'package_bytes'=>0,'updated_at'=>DB::now()],['id'=>$id]);return self::status($id);
     }
     private static function plan_step(int $id): array {
         global $wpdb;$j=self::job($id);if($j['status']!=='planning'){return self::status($id);}
-        $headers=json_decode($j['headers'],true);$f=fopen($j['file_path'],'rb');fseek($f,(int)$j['byte_offset']);$limit=(int)floor($j['plan_bytes']*.88)-4096;$number=(int)$j['current_package'];$bytes=(int)$j['package_bytes'];$total=(int)$j['total_rows'];$count=0;
+        $headers=json_decode($j['headers'],true);$f=fopen($j['file_path'],'rb');fseek($f,(int)$j['byte_offset']);$limit=(int)floor($j['plan_bytes']*.88)-4096;$number=(int)$j['current_package'];$bytes=(int)$j['package_bytes'];$total=(int)$j['total_rows'];$count=0;$started=microtime(true);
         $row_count=(int)$wpdb->get_var($wpdb->prepare('SELECT rows_count FROM '.DB::table('packages').' WHERE import_id=%d AND package_no=%d',$id,$number));
-        while($count<150&&($values=fgetcsv($f,0,';'))!==false){
+        while($count<150&&($values=fgetcsv($f,0,';','"',''))!==false){
             if(count($values)===1&&trim((string)$values[0])===''){continue;}
             if(count($values)!==count($headers)){fclose($f);throw new \InvalidArgumentException('Число колонок не совпадает в строке '.($total+2).'. Исправьте CSV.');}
             $row=array_combine($headers,$values);if(!trim($row['sku'])||!trim($row['name'])){continue;}
@@ -75,6 +75,7 @@ class Importer {
             $bytes+=$size;$row_count++;$total++;$count++;
             $filename='mik-'.$id.'-'.str_pad((string)$number,4,'0',STR_PAD_LEFT).'.zip';
             $wpdb->query($wpdb->prepare('INSERT INTO '.DB::table('packages').' (import_id,package_no,filename,estimated_bytes,rows_count) VALUES (%d,%d,%s,%d,%d) ON DUPLICATE KEY UPDATE estimated_bytes=VALUES(estimated_bytes),rows_count=VALUES(rows_count)',$id,$number,$filename,$bytes,$row_count));
+            if(microtime(true)-$started>6){break;}
         }
         $finished=feof($f);$offset=ftell($f);fclose($f);$wpdb->update(DB::table('imports'),['byte_offset'=>$offset,'current_package'=>$number,'package_bytes'=>$bytes,'total_rows'=>$total,'status'=>$finished?'ready':'planning','updated_at'=>DB::now()],['id'=>$id]);return self::status($id);
     }
