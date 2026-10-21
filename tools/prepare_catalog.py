@@ -88,15 +88,19 @@ def main():
     hash_paths={p.rsplit('/',1)[1].split('.')[0]:p for p in embedded}
     z=zipfile.ZipFile(a.xlsx)
     products=sheet(z,1)
-    counts=Counter();seen=set();rows=[];missing=set();direct_ozon=0;source_rows=0
+    counts=Counter();seen=set();rows=[];missing=set();direct_ozon=0;source_rows=0;recovered=[]
     for r in products:
         source_rows+=1
-        if len(r)<35 or not r[2]:continue
+        if len(r)<3:continue
         r += [''] * max(0,43-len(r))
+        unnamed=not plain(r[2])
+        if unnamed:
+            r[2]=r[21] or r[4] or ('Товар '+r[0])
+            recovered.append({'legacy_id':r[0],'original_sku':r[1],'recovered_name':r[2],'note':'В источнике пустое наименование. Использовано альтернативное; SKU заменён на legacy-ID. Цены и остатки сохранены без исправления.'})
         lid,original_sku,name=r[0],r[1].strip(),plain(r[2])
         counts[original_sku]+=1
         if name.lower() in ('test1','test','тест') and r[6] in ('','0'):continue
-        sku=original_sku or f'legacy-{lid}'
+        sku=f'legacy-{lid}' if unnamed else (original_sku or f'legacy-{lid}')
         if sku in seen:sku=f'{sku}-L{lid}'
         seen.add(sku)
         paths=[]
@@ -144,6 +148,7 @@ def main():
             for p in sorted(used):z.writestr(p,embedded[p])
     summary={'products':len(rows),'source_product_rows':source_rows,'duplicate_source_skus':sum(n-1 for n in counts.values() if n>1),'direct_ozon_links':direct_ozon,'unique_assets':len({x['path'] for r in rows for x in json.loads(r['assets_json'])}),'missing_from_map':sorted(missing),'embedded_media_files':len(used),'photos':sum(len(json.loads(r['images_json'])) for r in rows),'pdf_links':sum(len(json.loads(r['pdfs_json'])) for r in rows)}
     (out/'catalog-report.json').write_text(json.dumps(summary,ensure_ascii=False,indent=2))
+    (out/'source-field-notes.json').write_text(json.dumps(recovered,ensure_ascii=False,indent=2))
     print(json.dumps({k:v for k,v in summary.items() if k!='missing_from_map'},ensure_ascii=False))
     print('Missing paths:',len(missing))
     cache.close();(out/'source-texts.sqlite').unlink();z.close()
