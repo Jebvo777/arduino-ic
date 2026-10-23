@@ -3,6 +3,9 @@ namespace MIK;
 defined('ABSPATH') || exit;
 
 class Importer {
+    public const CATALOG_MAX=104857600;
+    public const PACKAGE_MAX=1073741824;
+    public const CHUNK_MAX=2097152;
     public static function dir(): string {
         $base=trailingslashit(get_temp_dir()).'mik-shop-'.substr(hash_hmac('sha256',home_url(),wp_salt('auth')),0,20);
         if(!is_dir($base)&&!wp_mkdir_p($base)){throw new \RuntimeException('Нет доступа к временной папке PHP.');}
@@ -16,6 +19,7 @@ class Importer {
     public static function dispatch(string $action,\WP_REST_Request $r): array {
         $p=(array)($r->get_json_params()?:$r->get_params());$id=absint($p['id']??0);
         if($action==='upload'){return self::upload($r);}
+        if(str_starts_with($action,'remote-')){return RemoteImport::dispatch(substr($action,7),$p);}
         if($action==='plan'){return self::lock($id,fn()=>self::plan($id,$p));}
         if($action==='plan-step'){return self::lock($id,fn()=>DB::transaction(fn()=>self::plan_step($id)));}
         if($action==='select'){return DB::transaction(fn()=>self::select($id,(array)($p['packages']??[])));}
@@ -27,29 +31,54 @@ class Importer {
         throw new \InvalidArgumentException('Неизвестное действие импорта.');
     }
     private static function upload(\WP_REST_Request $r): array {
-        global $wpdb;$p=$r->get_params();$files=$r->get_file_params();$file=$files['file']??null;
-        if(!$file||$file['error']!==UPLOAD_ERR_OK||!is_uploaded_file($file['tmp_name'])){throw new \InvalidArgumentException('Не удалось загрузить фрагмент. Проверьте лимиты PHP.');}
-        $token=(string)($p['upload_id']??'');if(!preg_match('/^[a-f0-9]{32}$/',$token)){throw new \InvalidArgumentException('Недопустимый ID загрузки.');}
-        $kind=($p['kind']??'')==='catalog'?'catalog':'package';$offset=max(0,(int)($p['offset']??0));$total=max(0,(int)($p['total']??0));$size=(int)filesize($file['tmp_name']);
-        if($total<1||$total>1073741824||$size>2097152||$offset+$size>$total){throw new \InvalidArgumentException('Недопустимый размер файла или фрагмента.');}
-        $path=self::dir().'/'.get_current_user_id().'-'.$kind.'-'.$token.'.part';$h=fopen($path,'c+b');if(!$h||!flock($h,LOCK_EX)){throw new \RuntimeException('Файл занят. Повторите запрос.');}
-        try{
-            $length=(int)fstat($h)['size'];
-            if($offset>$length){throw new \RuntimeException('Нарушен порядок загрузки. Повторите с текущего фрагмента.');}
-            if($offset<$length){fseek($h,$offset);$old=fread($h,$size);if(strlen($old)!==$size||!hash_equals(hash('sha256',$old),hash_file('sha256',$file['tmp_name']))){throw new \RuntimeException('Фрагмент не совпадает с уже загруженным. Начните загрузку заново.');}}
-            else{fseek($h,0,SEEK_END);$src=fopen($file['tmp_name'],'rb');$written=stream_copy_to_stream($src,$h);fclose($src);if($written!==$size){throw new \RuntimeException('Недостаточно места для загрузки.');}}
-            $length=(int)fstat($h)['size'];
-        }finally{flock($h,LOCK_UN);fclose($h);}
-        if($length<$total){return ['offset'=>$length,'done'=>false];}
+        $p=$r->get_body_params();$files=$r->get_file_params();$file=$files['file']??null;
+        if(!$file){throw new \InvalidArgumentException('Сервер не получил фрагмент. Обновите страницу и повторите загрузку.');}
+        if((int)$file['error']!==UPLOAD_ERR_OK){
+            $messages=[UPLOAD_ERR_INI_SIZE=>'Размер фрагмента превышает upload_max_filesize хостинга.',UPLOAD_ERR_FORM_SIZE=>'Размер фрагмента превышает лимит формы.',UPLOAD_ERR_PARTIAL=>'Фрагмент получен не полностью. Повторите загрузку.',UPLOAD_ERR_NO_TMP_DIR=>'На сервере недоступна временная папка PHP.',UPLOAD_ERR_CANT_WRITE=>'Сервер не смог записать фрагмент: проверьте свободное место.'];
+            throw new \InvalidArgumentException($messages[(int)$file['error']]??'Не удалось получить файл. Повторите загрузку.');
+        }
+        if(!is_uploaded_file($file['tmp_name'])){throw new \InvalidArgumentException('Недопустимый файл загрузки.');}
+        $token=(string)($p['upload_id']??'');if(!preg_match('/^[a-f0-9]{32}$/D',$token)){throw new \InvalidArgumentException('Недопустимый ID загрузки. Обновите страницу.');}
+        $kind=(string)($p['kind']??'');if(!in_array($kind,['catalog','package'],true)){throw new \InvalidArgumentException('Укажите тип файла: каталог или ZIP-пакет.');}
+        foreach(['offset','total'] as $key){if(!isset($p[$key])||!preg_match('/^\d+$/D',(string)$p[$key])){throw new \InvalidArgumentException('Некорректные параметры фрагмента. Обновите страницу после установки обновления.');}}
+        $offset=(int)$p['offset'];$total=(int)$p['total'];$size=(int)filesize($file['tmp_name']);$max=$kind==='catalog'?self::CATALOG_MAX:self::PACKAGE_MAX;
+        if($total<1||$total>$max){throw new \InvalidArgumentException($kind==='catalog'?'Каталог должен быть не пустым CSV размером до 100 МБ.':'ZIP-пакет должен быть размером до 1 ГБ.');}
+        if($size<1||$size>self::CHUNK_MAX){throw new \InvalidArgumentException('Получен фрагмент '.size_format($size,2).', допустимо до 2 МБ. Перезагрузите страницу админки после обновления плагина и повторите загрузку.');}
+        if($offset>$total||$size>$total-$offset){throw new \InvalidArgumentException('Границы фрагмента выходят за размер файла. Обновите страницу и повторите загрузку.');}
+        $path=self::dir().'/'.get_current_user_id().'-'.$kind.'-'.$token.'.part';$h=fopen($path,'c+b');
+        if(!$h){throw new \RuntimeException('Не удалось открыть временный файл. Проверьте права и свободное место.');}
+        if(!flock($h,LOCK_EX)){fclose($h);throw new \RuntimeException('Файл занят. Повторите запрос.');}
+        try {
+            $length=(int)fstat($h)['size'];if($length>$total){throw new \InvalidArgumentException('Размер сохранённой загрузки не совпадает с файлом. Начните новую загрузку.');}
+            if($offset>$length){throw new \RuntimeException('Нарушен порядок загрузки. Повторно выберите тот же файл для продолжения.');}
+            if($offset<$length){
+                fseek($h,$offset);$old=fread($h,$size);
+                if(strlen($old)!==$size||!hash_equals(hash('sha256',$old),hash_file('sha256',$file['tmp_name']))){throw new \InvalidArgumentException('Фрагмент отличается от сохранённого. Выберите исходный файл или начните новую загрузку.');}
+            } else {
+                fseek($h,0,SEEK_END);$src=fopen($file['tmp_name'],'rb');if(!$src){throw new \RuntimeException('Не удалось прочитать фрагмент.');}
+                try{$written=stream_copy_to_stream($src,$h);}finally{fclose($src);}
+                if($written!==$size){ftruncate($h,$length);throw new \RuntimeException('Недостаточно места для сохранения фрагмента.');}
+            }
+            fflush($h);$length=(int)fstat($h)['size'];
+            return $length<$total?['offset'=>$length,'done'=>false]:self::complete_upload($kind,$path,absint($p['id']??0),$length);
+        } finally {flock($h,LOCK_UN);fclose($h);}
+    }
+    /** Local chunks and remote downloads share exactly the same file validation. */
+    public static function complete_upload(string $kind,string $path,int $id,int $length): array {
+        global $wpdb;
         if($kind==='catalog'){
-            if($total>104857600){throw new \InvalidArgumentException('Каталог CSV не должен превышать 100 МБ.');}
+            if($length<1||$length>self::CATALOG_MAX){throw new \InvalidArgumentException('Каталог CSV не должен превышать 100 МБ.');}
             $existing=$wpdb->get_var($wpdb->prepare('SELECT id FROM '.DB::table('imports').' WHERE file_path=%s',$path));
             if($existing){return ['offset'=>$length,'done'=>true,'id'=>(int)$existing];}
-            $f=fopen($path,'rb');$headers=fgetcsv($f,0,';','"','');fclose($f);if($headers){$headers[0]=preg_replace('/^\xEF\xBB\xBF/','',$headers[0]);}
+            $f=fopen($path,'rb');if(!$f){throw new \RuntimeException('Не удалось прочитать каталог.');}
+            try{$headers=fgetcsv($f,0,';','"','');}finally{fclose($f);}
+            if($headers){$headers[0]=preg_replace('/^\xEF\xBB\xBF/','',$headers[0]);}
             if(!$headers||array_diff(['legacy_id','sku','name','assets_json','images_json','pdfs_json'],(array)$headers)){throw new \InvalidArgumentException('Используйте подготовленный catalog.csv в UTF-8 с разделителем «;».');}
-            DB::require_result($wpdb->insert(DB::table('imports'),['file_path'=>$path,'headers'=>DB::json($headers),'created_at'=>DB::now(),'updated_at'=>DB::now()]));return ['offset'=>$length,'done'=>true,'id'=>(int)$wpdb->insert_id];
+            DB::require_result($wpdb->insert(DB::table('imports'),['file_path'=>$path,'headers'=>DB::json($headers),'created_at'=>DB::now(),'updated_at'=>DB::now()]));
+            return ['offset'=>$length,'done'=>true,'id'=>(int)$wpdb->insert_id];
         }
-        $id=absint($p['id']??0);$package=self::accept_zip($id,$path);return ['offset'=>$length,'done'=>true,'id'=>$id,'package'=>$package];
+        if($length<1||$length>self::PACKAGE_MAX){throw new \InvalidArgumentException('ZIP-пакет должен быть размером до 1 ГБ.');}
+        return ['offset'=>$length,'done'=>true,'id'=>$id,'package'=>self::accept_zip($id,$path)];
     }
     private static function job(int $id): array {
         global $wpdb;$j=$wpdb->get_row($wpdb->prepare('SELECT * FROM '.DB::table('imports').' WHERE id=%d',$id),ARRAY_A);if(!$j||!is_file($j['file_path'])){throw new \InvalidArgumentException('Каталог импорта не найден. Загрузите CSV заново.');}return $j;

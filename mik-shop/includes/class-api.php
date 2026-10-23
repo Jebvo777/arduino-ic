@@ -46,6 +46,7 @@ class API {
         self::route('/orders','GET',fn()=>Commerce::orders());
         self::route('/orders','POST',fn($r)=>Commerce::checkout(self::payload($r)),'write');
         self::route('/orders/(?P<id>\d+)','GET',fn($r)=>Commerce::order((int)$r['id']));
+        self::route('/admin/media/upload','POST',fn($r)=>Admin::upload_media($r),'admin');
         self::route('/admin/(?P<tab>[a-z_-]+)','GET',fn($r)=>Admin::data(sanitize_key($r['tab']),$r->get_params()),'admin');
         self::route('/admin/(?P<tab>[a-z_-]+)','POST',fn($r)=>Admin::save(sanitize_key($r['tab']),self::payload($r)),'admin');
         self::route('/import/(?P<action>[a-z_-]+)','POST',fn($r)=>Importer::dispatch(sanitize_key($r['action']),$r),'admin');
