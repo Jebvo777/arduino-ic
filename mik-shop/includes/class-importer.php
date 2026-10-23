@@ -6,6 +6,7 @@ class Importer {
     public const CATALOG_MAX=104857600;
     public const PACKAGE_MAX=1073741824;
     public const CHUNK_MAX=2097152;
+    public const IMAGE_EXTENSIONS=['jpg','jpeg','jpe','png','webp','gif','avif','bmp','dib','tif','tiff','ico','heic','heif'];
     private const PLANNER_VERSION=2;
     private const MANIFEST_MAX=8388608;
     public static function dir(): string {
@@ -156,7 +157,7 @@ class Importer {
     private static function token(array $j,int $number): string { return hash_hmac('sha256',$j['id'].'|'.$number.'|'.hash_file('sha256',$j['file_path']),wp_salt('auth')); }
     public static function bat(int $id): string {
         global $wpdb;$j=self::job($id);if($j['status']!=='ready'){throw new \InvalidArgumentException('План ещё не готов.');}
-        $packages=$wpdb->get_results($wpdb->prepare('SELECT * FROM '.DB::table('packages').' WHERE import_id=%d AND selected=1 ORDER BY package_no',$id),ARRAY_A);$plan=['job_id'=>$id,'max_bytes'=>(int)$j['plan_bytes'],'packages'=>[]];
+        $packages=$wpdb->get_results($wpdb->prepare('SELECT * FROM '.DB::table('packages').' WHERE import_id=%d AND selected=1 ORDER BY package_no',$id),ARRAY_A);$plan=['job_id'=>$id,'max_bytes'=>(int)$j['plan_bytes'],'image_extensions'=>self::IMAGE_EXTENSIONS,'packages'=>[]];
         foreach($packages as $p){
             $files=[];$offset=0;
             if((int)($j['planner_version']??1)>=self::PLANNER_VERSION){$files=$wpdb->get_results($wpdb->prepare('SELECT path,file_size AS size FROM '.DB::table('plan_assets').' WHERE import_id=%d AND package_no=%d ORDER BY path_hash',$id,$p['package_no']),ARRAY_A);foreach($files as &$file){$file['size']=(int)$file['size'];}unset($file);}
@@ -170,13 +171,14 @@ class Importer {
     }
     private static function valid_path(string $path): string {
         $path=str_replace('\\','/',$path);$ext=strtolower(pathinfo($path,PATHINFO_EXTENSION));
-        if($path===''||str_starts_with($path,'/')||str_contains($path,':')||str_contains($path,"\0")||preg_match('~(?:^|/)\.\.(?:/|$)~',$path)||!in_array($ext,['jpg','jpeg','png','gif','webp','pdf'],true)){throw new \InvalidArgumentException('Недопустимый путь медиафайла: '.sanitize_text_field($path));}return $path;
+        if($path===''||str_starts_with($path,'/')||str_contains($path,':')||str_contains($path,"\0")||preg_match('~(?:^|/)\.\.(?:/|$)~',$path)||!in_array($ext,array_merge(self::IMAGE_EXTENSIONS,['pdf']),true)){throw new \InvalidArgumentException('Недопустимый путь медиафайла: '.sanitize_text_field($path));}return $path;
     }
     private static function accept_zip(int $id,string $path): int {
         global $wpdb;if(!class_exists('ZipArchive')){throw new \RuntimeException('На хостинге необходимо включить PHP ZipArchive.');}$j=self::job($id);$z=new \ZipArchive();if($z->open($path)!==true){throw new \InvalidArgumentException('Повреждён ZIP.');}
         try{
             $stat=$z->statName('manifest.json');if(!$stat||$stat['size']>self::MANIFEST_MAX){throw new \InvalidArgumentException('В ZIP отсутствует допустимый manifest.json.');}
-            $m=json_decode($z->getFromName('manifest.json'),true);$n=absint($m['package_no']??0);
+            $m=json_decode($z->getFromName('manifest.json'),true);if(!is_array($m)||!is_array($m['files']??null)||!is_array($m['aliases']??[])){throw new \InvalidArgumentException('Некорректный манифест ZIP.');}$n=absint($m['package_no']??0);
+            foreach(($m['aliases']??[]) as $requested=>$actual){if(!is_string($requested)||!is_string($actual)||!self::same_image_name(self::valid_path($requested),self::valid_path($actual))||!isset($m['files'][$actual])){throw new \InvalidArgumentException('Некорректная замена расширения изображения в ZIP.');}}
             if((int)($m['job_id']??0)!==$id||!hash_equals(self::token($j,$n),(string)($m['token']??''))){throw new \InvalidArgumentException('Этот пакет не принадлежит выбранному импорту.');}
             $p=$wpdb->get_row($wpdb->prepare('SELECT * FROM '.DB::table('packages').' WHERE import_id=%d AND package_no=%d',$id,$n),ARRAY_A);
             if(!$p||!$p['selected']){throw new \InvalidArgumentException('Пакет не выбран в плане.');}
@@ -209,24 +211,58 @@ class Importer {
         if(!$remaining){$errors=(int)$wpdb->get_var($wpdb->prepare('SELECT COUNT(*) FROM '.DB::table('import_rows')." WHERE import_id=%d AND package_no=%d AND status='error'",$id,$number));$wpdb->update(DB::table('packages'),['status'=>$errors?'done-errors':'done'],['import_id'=>$id,'package_no'=>$number]);}
         return self::status($id);
     }
+    private static function same_image_name(string $requested,string $actual): bool {
+        $lower=fn($value)=>mb_strtolower($value,'UTF-8');if($lower($requested)===$lower($actual)){return true;}
+        $from=strtolower(pathinfo($requested,PATHINFO_EXTENSION));$to=strtolower(pathinfo($actual,PATHINFO_EXTENSION));
+        return in_array($from,self::IMAGE_EXTENSIONS,true)&&in_array($to,self::IMAGE_EXTENSIONS,true)&&$lower(substr($requested,0,-strlen($from)-1))===$lower(substr($actual,0,-strlen($to)-1));
+    }
+    /** Keep the CSV path as the lookup key while reading the image under its real ZIP name. */
+    private static function resolve_media(string $path,\ZipArchive $z,array $m): ?string {
+        if(isset($m['files'][$path])&&$z->locateName($path)!==false){return $path;}
+        $alias=$m['aliases'][$path]??null;
+        if(is_string($alias)){$alias=self::valid_path($alias);if(self::same_image_name($path,$alias)&&isset($m['files'][$alias])&&$z->locateName($alias)!==false){return $alias;}}
+        $extension=strtolower(pathinfo($path,PATHINFO_EXTENSION));$extensions=in_array($extension,self::IMAGE_EXTENSIONS,true)?array_unique(array_merge([$extension],self::IMAGE_EXTENSIONS)):[$extension];
+        $stem=substr($path,0,-strlen($extension)-1);
+        foreach($extensions as $candidate_extension){$index=$z->locateName($stem.'.'.$candidate_extension,\ZipArchive::FL_NOCASE);if($index!==false){$candidate=$z->getNameIndex($index);if(is_string($candidate)&&isset($m['files'][$candidate])&&self::same_image_name($path,$candidate)){return self::valid_path($candidate);}}}
+        return null;
+    }
+    /** Recognise bytes rather than trusting a stale extension; convert legacy image formats when available. */
+    private static function prepare_image(string $tmp,string $source_path): array {
+        $mime=wp_get_image_mime($tmp);
+        if(!$mime&&class_exists('finfo')){$detector=new \finfo(FILEINFO_MIME_TYPE);$mime=$detector->file($tmp);}
+        $direct=['image/jpeg'=>'jpg','image/png'=>'png','image/gif'=>'gif','image/webp'=>'webp','image/avif'=>'avif'];
+        $legacy=['image/bmp','image/x-bmp','image/x-ms-bmp','image/tiff','image/x-tiff','image/vnd.microsoft.icon','image/x-icon','image/ico','image/icon','image/heic','image/heif','image/heic-sequence','image/heif-sequence'];
+        if(!isset($direct[$mime?:''])&&!in_array($mime,$legacy,true)){throw new \InvalidArgumentException('Файл не является поддерживаемым изображением: '.$source_path);}
+        $dims=wp_getimagesize($tmp);
+        if(isset($direct[$mime])&&$dims&&$dims[0]>0&&$dims[1]>0){return ['path'=>$tmp,'ext'=>$direct[$mime],'mime'=>$mime,'dims'=>$dims];}
+        require_once ABSPATH.'wp-admin/includes/image.php';$editor=wp_get_image_editor($tmp,['mime_type'=>$mime]);
+        if(is_wp_error($editor)){throw new \RuntimeException('Изображение найдено, но хостинг не поддерживает чтение или преобразование '.$mime.': '.$source_path.'. Сохраните его в JPG, PNG или WebP.');}
+        $converted=$tmp.'.png';
+        try{
+            $saved=$editor->save($converted,'image/png');if(is_wp_error($saved)){throw new \RuntimeException('Не удалось преобразовать изображение в PNG: '.$source_path);}
+            $converted=$saved['path'];$dims=wp_getimagesize($converted);if(!$dims||($dims['mime']??'')!=='image/png'){throw new \RuntimeException('Не удалось получить PNG после преобразования: '.$source_path);}
+            return ['path'=>$converted,'ext'=>'png','mime'=>'image/png','dims'=>$dims];
+        }catch(\Throwable $e){@unlink($converted);throw $e;}
+    }
     private static function media(string $path,\ZipArchive $z,array $m,array &$warnings): int {
-        global $wpdb;$path=self::valid_path($path);$expected=$m['files'][$path]??null;
-        if(!$expected||$z->locateName($path)===false){$warnings[]='Нет файла: '.$path;return 0;}
+        global $wpdb;$requested=self::valid_path($path);$path=self::resolve_media($requested,$z,$m);
+        if($path===null){$warnings[]='Нет файла: '.$requested;return 0;}$expected=$m['files'][$path];
         $sha=(string)($expected['sha256']??'');if(!preg_match('/^[a-f0-9]{64}$/',$sha)){throw new \InvalidArgumentException('Некорректная контрольная сумма файла.');}
         $old=(int)$wpdb->get_var($wpdb->prepare("SELECT post_id FROM {$wpdb->postmeta} WHERE meta_key='_mik_asset_sha256' AND meta_value=%s LIMIT 1",$sha));if($old&&get_post_type($old)==='attachment'&&is_file(get_attached_file($old))){return $old;}
-        $source=$z->getStream($path);if(!$source){throw new \RuntimeException('Не удалось прочитать файл ZIP.');}$tmp=tempnam(self::dir(),'asset-');$target=fopen($tmp,'wb');stream_copy_to_stream($source,$target);fclose($source);fclose($target);
+        $source=$z->getStream($path);if(!$source){throw new \RuntimeException('Не удалось прочитать файл ZIP.');}$tmp=tempnam(self::dir(),'asset-');$target=fopen($tmp,'wb');stream_copy_to_stream($source,$target);fclose($source);fclose($target);$stored=$tmp;
         try{
             if(!hash_equals($sha,hash_file('sha256',$tmp))){throw new \RuntimeException('Контрольная сумма не совпала: '.$path);}
             $ext=strtolower(pathinfo($path,PATHINFO_EXTENSION));$mime='';$dims=null;
             if($ext==='pdf'){$f=fopen($tmp,'rb');$head=fread($f,5);fclose($f);if($head!=='%PDF-'){throw new \InvalidArgumentException('Файл не является PDF: '.$path);}$mime='application/pdf';}
-            else{$dims=wp_getimagesize($tmp);if(!$dims||!in_array($dims['mime']??'',['image/jpeg','image/png','image/gif','image/webp'],true)){throw new \InvalidArgumentException('Файл не является изображением: '.$path);}$mime=$dims['mime'];}
+            else{$image=self::prepare_image($tmp,$path);$ext=$image['ext'];$mime=$image['mime'];$dims=$image['dims'];$stored=$image['path'];}
             $upload=wp_upload_dir();if($upload['error']){throw new \RuntimeException($upload['error']);}$dir=$upload['basedir'].'/mik-media';if(!wp_mkdir_p($dir)){throw new \RuntimeException('Не удалось создать папку медиа.');}$dest=$dir.'/'.$sha.'.'.$ext;
-            if(!is_file($dest)&&!copy($tmp,$dest)){throw new \RuntimeException('Не удалось сохранить медиафайл.');}
+            if(!is_file($dest)&&!copy($stored,$dest)){throw new \RuntimeException('Не удалось сохранить медиафайл.');}
             $attachment=wp_insert_attachment(['post_title'=>sanitize_text_field(pathinfo($path,PATHINFO_FILENAME)),'post_mime_type'=>$mime,'post_status'=>'inherit'],$dest,0,true);if(is_wp_error($attachment)){throw new \RuntimeException($attachment->get_error_message());}
             update_post_meta($attachment,'_mik_asset_sha256',$sha);update_post_meta($attachment,'_mik_source_path',$path);
+            if($requested!==$path){update_post_meta($attachment,'_mik_requested_path',$requested);}
             if($dims){wp_update_attachment_metadata($attachment,['width'=>$dims[0],'height'=>$dims[1],'file'=>'mik-media/'.basename($dest),'sizes'=>[]]);}
             return (int)$attachment;
-        }finally{@unlink($tmp);}
+        }finally{if($stored!==$tmp){@unlink($stored);}@unlink($tmp);}
     }
     private static function import_product(array $r,\ZipArchive $z,array $manifest,array &$warnings): void {
         global $wpdb;$legacy=sanitize_text_field($r['legacy_id']??'');$sku=sanitize_text_field($r['sku']??'');$name=sanitize_text_field($r['name']??'');if($sku===''||$name===''){throw new \InvalidArgumentException('Нет артикула или названия.');}
