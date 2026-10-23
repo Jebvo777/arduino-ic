@@ -82,7 +82,8 @@ class Importer {
             return ['offset'=>$length,'done'=>true,'id'=>(int)$wpdb->insert_id];
         }
         if($length<1||$length>self::PACKAGE_MAX){throw new \InvalidArgumentException('ZIP-пакет должен быть размером до 1 ГБ.');}
-        return ['offset'=>$length,'done'=>true,'id'=>$id,'package'=>self::accept_zip($id,$path)];
+        $number=self::accept_zip($id,$path);$job=self::status($id);$package=null;foreach($job['packages'] as $candidate){if((int)$candidate['package_no']===$number){$package=$candidate;break;}}
+        return ['offset'=>$length,'done'=>true,'id'=>$id,'package'=>$number,'ready'=>$package&&in_array($package['status'],['uploaded','processing','done','done-errors'],true),'parts_received'=>(int)($package['parts_received']??0),'parts_total'=>(int)($package['parts_total']??0),'next_filename'=>$package['next_filename']??''];
     }
     private static function job(int $id): array {
         global $wpdb;$j=$wpdb->get_row($wpdb->prepare('SELECT * FROM '.DB::table('imports').' WHERE id=%d',$id),ARRAY_A);if(!$j||!is_file($j['file_path'])){throw new \InvalidArgumentException('Каталог импорта не найден. Загрузите CSV заново.');}return $j;
@@ -124,7 +125,6 @@ class Importer {
             $assets=json_decode($row['assets_json']??'[]',true);if(!is_array($assets)){fclose($f);throw new \InvalidArgumentException('Некорректный assets_json у '.$row['sku']);}
             $unique=[];foreach($assets as $a){if(!is_array($a)){fclose($f);throw new \InvalidArgumentException('Некорректный список файлов у '.$row['sku']);}$path=self::valid_path((string)($a['path']??''));$size=max(0,(int)($a['size']??0));$hash=hash('sha256',$path);$unique[$hash]=['path'=>$path,'size'=>max($size,$unique[$hash]['size']??0)];}
             $size=0;$delta=0;foreach($unique as $hash=>$a){$cost=self::asset_cost($a['path'],$a['size']);$size+=$cost;$delta+=isset($known[$hash])?max(0,$cost-self::asset_cost($a['path'],$known[$hash])):$cost;}
-            if($size>$limit){fclose($f);throw new \InvalidArgumentException('Товар '.$row['sku'].' требует около '.ceil($size/1048576).' МБ. Для него нужен больший размер одного ZIP. Пересчитайте пакеты с большим лимитом.');}
             // Only the per-archive byte budget splits the catalogue. Products are still processed in small REST batches.
             if($row_count&&$bytes+$delta>$limit){$number++;$bytes=0;$row_count=0;$known=[];$delta=$size;}
             DB::require_result($wpdb->insert(DB::table('import_rows'),['import_id'=>$id,'package_no'=>$number,'legacy_id'=>sanitize_text_field($row['legacy_id']),'row_json'=>DB::json($row),'status'=>'pending']));
@@ -140,13 +140,14 @@ class Importer {
         global $wpdb;if(!$id){return ['jobs'=>$wpdb->get_results('SELECT id,status,total_rows,created_at FROM '.DB::table('imports').' ORDER BY id DESC LIMIT 20',ARRAY_A)];}
         $j=$wpdb->get_row($wpdb->prepare('SELECT id,status,total_rows,plan_bytes,planner_version,created_at FROM '.DB::table('imports').' WHERE id=%d',$id),ARRAY_A);if(!$j){throw new \InvalidArgumentException('Импорт не найден.');}
         foreach(['id','total_rows','plan_bytes','planner_version'] as $key){$j[$key]=(int)$j[$key];}
-        $j['packages']=$wpdb->get_results($wpdb->prepare('SELECT package_no,filename,estimated_bytes,rows_count,selected,status FROM '.DB::table('packages').' WHERE import_id=%d ORDER BY package_no',$id),ARRAY_A);
+        $j['packages']=$wpdb->get_results($wpdb->prepare('SELECT package_no,filename,estimated_bytes,rows_count,selected,status,parts_total FROM '.DB::table('packages').' WHERE import_id=%d ORDER BY package_no',$id),ARRAY_A);
         foreach($j['packages'] as &$package){foreach(['package_no','estimated_bytes','rows_count','selected'] as $key){$package[$key]=(int)$package[$key];}}unset($package);
+        $j['packages']=ImportParts::decorate($id,$j['packages']);
         $j['estimated_total_bytes']=array_sum(array_column($j['packages'],'estimated_bytes'));
         $j['processed']=(int)$wpdb->get_var($wpdb->prepare('SELECT COUNT(*) FROM '.DB::table('import_rows')." WHERE import_id=%d AND status='done'",$id));
         $j['error_count']=(int)$wpdb->get_var($wpdb->prepare('SELECT COUNT(*) FROM '.DB::table('import_rows')." WHERE import_id=%d AND status='error'",$id));
         $j['errors']=$wpdb->get_results($wpdb->prepare('SELECT id,package_no,legacy_id,error FROM '.DB::table('import_rows')." WHERE import_id=%d AND error IS NOT NULL AND error<>'' ORDER BY id DESC LIMIT 100",$id),ARRAY_A);
-        $pending=array_values(array_filter($j['packages'],fn($p)=>$p['selected']&&!in_array($p['status'],['done','done-errors'],true)));$j['next']=$pending[0]??null;
+        $pending=array_values(array_filter($j['packages'],fn($p)=>$p['selected']&&!in_array($p['status'],['done','done-errors'],true)));$j['next']=$pending[0]??null;if(!empty($j['next']['next_filename'])){$j['next']['filename']=$j['next']['next_filename'];}
         $j['bat_url']=add_query_arg('_wpnonce',wp_create_nonce('mik_packager'),admin_url('admin-post.php?action=mik_document&kind=packager&id='.$id));return $j;
     }
     private static function select(int $id,array $ids): array {
@@ -182,6 +183,7 @@ class Importer {
             if((int)($m['job_id']??0)!==$id||!hash_equals(self::token($j,$n),(string)($m['token']??''))){throw new \InvalidArgumentException('Этот пакет не принадлежит выбранному импорту.');}
             $p=$wpdb->get_row($wpdb->prepare('SELECT * FROM '.DB::table('packages').' WHERE import_id=%d AND package_no=%d',$id,$n),ARRAY_A);
             if(!$p||!$p['selected']){throw new \InvalidArgumentException('Пакет не выбран в плане.');}
+            if(filesize($path)>(int)$j['plan_bytes']){throw new \InvalidArgumentException('Размер ZIP превышает выбранный максимум одного архива. Скачайте новый BAT и используйте ZIP-части.');}
             $size=0;if($z->numFiles>20000){throw new \InvalidArgumentException('Слишком много файлов в ZIP.');}
             for($i=0;$i<$z->numFiles;$i++){
                 $s=$z->statIndex($i);$name=$s['name'];if($name!=='manifest.json'){self::valid_path($name);if(!isset($m['files'][$name])){throw new \InvalidArgumentException('Лишний файл в пакете.');}}
@@ -189,6 +191,9 @@ class Importer {
                 if($z->getExternalAttributesIndex($i,$opsys,$attrs)&&($attrs>>16&0170000)===0120000){throw new \InvalidArgumentException('Символические ссылки запрещены.');}
             }
             if($size>(int)$j['plan_bytes']*2+2097152){throw new \InvalidArgumentException('Распакованный пакет превышает лимит плана.');}
+            foreach($m['files'] as $actual=>$file){self::valid_path((string)$actual);$entry=$z->statName($actual);if(!is_array($file)||!$entry||!preg_match('/^[a-f0-9]{64}$/D',(string)($file['sha256']??''))||(int)($file['size']??-1)!==(int)$entry['size']){throw new \InvalidArgumentException('Некорректные сведения о файле: '.sanitize_text_field((string)$actual));}}
+            if((int)($m['version']??1)===3){ImportParts::register($id,$p,$path,$m);return $n;}
+            if((int)($p['parts_total']??0)>0){throw new \InvalidArgumentException('Для этого пакета уже загружаются ZIP-части. Используйте файлы из той же сборки BAT.');}
             if(in_array($p['status'],['done','done-errors'],true)){return $n;}
             $wpdb->update(DB::table('packages'),['zip_path'=>$path,'status'=>'uploaded'],['import_id'=>$id,'package_no'=>$n]);return $n;
         }finally{$z->close();}
@@ -196,17 +201,17 @@ class Importer {
     private static function step(int $id,int $number): array {
         global $wpdb;$j=self::job($id);$p=$wpdb->get_row($wpdb->prepare('SELECT * FROM '.DB::table('packages').' WHERE import_id=%d AND package_no=%d',$id,$number),ARRAY_A);
         if($p&&$p['selected']&&in_array($p['status'],['done','done-errors'],true)){return self::status($id);}
-        if(!$p||!$p['selected']||!in_array($p['status'],['uploaded','processing'],true)||!is_file($p['zip_path'])){throw new \InvalidArgumentException('Сначала загрузите выбранный ZIP-пакет.');}
-        $z=new \ZipArchive();if($z->open($p['zip_path'])!==true){throw new \RuntimeException('Не удалось открыть пакет.');}$manifest=json_decode($z->getFromName('manifest.json'),true);
+        if(!$p||!$p['selected']||!in_array($p['status'],['uploaded','processing'],true)){throw new \InvalidArgumentException('Сначала загрузите все ZIP-части выбранного пакета.');}
+        $files=new ImportFiles($id,$p);
         $rows=$wpdb->get_results($wpdb->prepare('SELECT * FROM '.DB::table('import_rows')." WHERE import_id=%d AND package_no=%d AND status='pending' ORDER BY id LIMIT 8",$id,$number),ARRAY_A);$start=microtime(true);
         $wpdb->update(DB::table('packages'),['status'=>'processing'],['import_id'=>$id,'package_no'=>$number]);
         try{
             foreach($rows as $entry){
-                try{$warnings=[];self::import_product(json_decode($entry['row_json'],true),$z,$manifest,$warnings);$wpdb->update(DB::table('import_rows'),['status'=>'done','error'=>$warnings?implode('; ',$warnings):null],['id'=>$entry['id']]);}
+                try{$warnings=[];self::import_product(json_decode($entry['row_json'],true),$files,$warnings);$wpdb->update(DB::table('import_rows'),['status'=>'done','error'=>$warnings?implode('; ',$warnings):null],['id'=>$entry['id']]);}
                 catch(\Throwable $e){$wpdb->update(DB::table('import_rows'),['status'=>'error','error'=>mb_substr($e->getMessage(),0,4000)],['id'=>$entry['id']]);}
                 if(microtime(true)-$start>8){break;}
             }
-        }finally{$z->close();}
+        }finally{$files->close();}
         $remaining=(int)$wpdb->get_var($wpdb->prepare('SELECT COUNT(*) FROM '.DB::table('import_rows')." WHERE import_id=%d AND package_no=%d AND status='pending'",$id,$number));
         if(!$remaining){$errors=(int)$wpdb->get_var($wpdb->prepare('SELECT COUNT(*) FROM '.DB::table('import_rows')." WHERE import_id=%d AND package_no=%d AND status='error'",$id,$number));$wpdb->update(DB::table('packages'),['status'=>$errors?'done-errors':'done'],['import_id'=>$id,'package_no'=>$number]);}
         return self::status($id);
@@ -217,7 +222,7 @@ class Importer {
         return in_array($from,self::IMAGE_EXTENSIONS,true)&&in_array($to,self::IMAGE_EXTENSIONS,true)&&$lower(substr($requested,0,-strlen($from)-1))===$lower(substr($actual,0,-strlen($to)-1));
     }
     /** Keep the CSV path as the lookup key while reading the image under its real ZIP name. */
-    private static function resolve_media(string $path,\ZipArchive $z,array $m): ?string {
+    public static function resolve_media(string $path,\ZipArchive $z,array $m): ?string {
         if(isset($m['files'][$path])&&$z->locateName($path)!==false){return $path;}
         $alias=$m['aliases'][$path]??null;
         if(is_string($alias)){$alias=self::valid_path($alias);if(self::same_image_name($path,$alias)&&isset($m['files'][$alias])&&$z->locateName($alias)!==false){return $alias;}}
@@ -244,9 +249,9 @@ class Importer {
             return ['path'=>$converted,'ext'=>'png','mime'=>'image/png','dims'=>$dims];
         }catch(\Throwable $e){@unlink($converted);throw $e;}
     }
-    private static function media(string $path,\ZipArchive $z,array $m,array &$warnings): int {
-        global $wpdb;$requested=self::valid_path($path);$path=self::resolve_media($requested,$z,$m);
-        if($path===null){$warnings[]='Нет файла: '.$requested;return 0;}$expected=$m['files'][$path];
+    private static function media(string $path,ImportFiles $files,array &$warnings): int {
+        global $wpdb;$requested=self::valid_path($path);$resolved=$files->find($requested);
+        if($resolved===null){$warnings[]='Нет файла: '.$requested;return 0;}$path=$resolved['path'];$expected=$resolved['expected'];$z=$resolved['zip'];
         $sha=(string)($expected['sha256']??'');if(!preg_match('/^[a-f0-9]{64}$/',$sha)){throw new \InvalidArgumentException('Некорректная контрольная сумма файла.');}
         $old=(int)$wpdb->get_var($wpdb->prepare("SELECT post_id FROM {$wpdb->postmeta} WHERE meta_key='_mik_asset_sha256' AND meta_value=%s LIMIT 1",$sha));if($old&&get_post_type($old)==='attachment'&&is_file(get_attached_file($old))){return $old;}
         $source=$z->getStream($path);if(!$source){throw new \RuntimeException('Не удалось прочитать файл ZIP.');}$tmp=tempnam(self::dir(),'asset-');$target=fopen($tmp,'wb');stream_copy_to_stream($source,$target);fclose($source);fclose($target);$stored=$tmp;
@@ -264,11 +269,11 @@ class Importer {
             return (int)$attachment;
         }finally{if($stored!==$tmp){@unlink($stored);}@unlink($tmp);}
     }
-    private static function import_product(array $r,\ZipArchive $z,array $manifest,array &$warnings): void {
+    private static function import_product(array $r,ImportFiles $files,array &$warnings): void {
         global $wpdb;$legacy=sanitize_text_field($r['legacy_id']??'');$sku=sanitize_text_field($r['sku']??'');$name=sanitize_text_field($r['name']??'');if($sku===''||$name===''){throw new \InvalidArgumentException('Нет артикула или названия.');}
         $id=$legacy!==''?(int)$wpdb->get_var($wpdb->prepare("SELECT post_id FROM {$wpdb->postmeta} WHERE meta_key='_mik_legacy_id' AND meta_value=%s LIMIT 1",$legacy)):0;
         if(!$id){$id=(int)wc_get_product_id_by_sku($sku);}$product=$id?wc_get_product($id):new \WC_Product_Simple();if(!$product||!$product->is_type('simple')){throw new \InvalidArgumentException('SKU занят товаром другого типа: '.$sku);}
-        $images=[];$pdfs=[];foreach(json_decode($r['images_json']??'[]',true)?:[] as $path){$a=self::media($path,$z,$manifest,$warnings);if($a){$images[]=$a;}}foreach(json_decode($r['pdfs_json']??'[]',true)?:[] as $path){$a=self::media($path,$z,$manifest,$warnings);if($a){$pdfs[]=$a;}}
+        $images=[];$pdfs=[];foreach(json_decode($r['images_json']??'[]',true)?:[] as $path){$a=self::media($path,$files,$warnings);if($a){$images[]=$a;}}foreach(json_decode($r['pdfs_json']??'[]',true)?:[] as $path){$a=self::media($path,$files,$warnings);if($a){$pdfs[]=$a;}}
         $product->set_name($name);$product->set_sku($sku);$product->set_status('publish');$product->set_description(wp_kses_post($r['description']??''));$product->set_short_description(wp_kses_post($r['short_description']??''));$product->set_manage_stock(true);$stock=max(0,(int)($r['stock']??0));$product->set_stock_quantity($stock);$product->set_stock_status($stock?'instock':'outofstock');$product->set_regular_price(is_numeric($r['price_rub']??'')?wc_format_decimal($r['price_rub']):'');$product->set_sale_price('');
         $product->set_featured(!empty($r['featured']));if($images){$product->set_image_id($images[0]);$product->set_gallery_image_ids(array_slice(array_unique($images),1));}
         $category=sanitize_text_field($r['category']??'Прочие компоненты');$term=term_exists($category,'product_cat');if(!$term){$term=wp_insert_term($category,'product_cat');}if(!is_wp_error($term)){$product->set_category_ids([(int)(is_array($term)?$term['term_id']:$term)]);}
