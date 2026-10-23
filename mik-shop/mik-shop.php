@@ -2,7 +2,7 @@
 /**
  * Plugin Name: MIK Shop
  * Description: Магазин MIK: собственные кабинеты, корзина, избранное, заказы и пакетный импорт; товары WooCommerce.
- * Version: 1.2.3
+ * Version: 1.2.4
  * Requires at least: 6.5
  * Requires PHP: 8.0
  * Requires Plugins: woocommerce
@@ -11,7 +11,7 @@
  * Text Domain: mik-shop
  */
 defined('ABSPATH') || exit;
-define('MIK_VERSION', '1.2.3');
+define('MIK_VERSION', '1.2.4');
 define('MIK_PATH', plugin_dir_path(__FILE__));
 define('MIK_URL', plugin_dir_url(__FILE__));
 foreach (['settings','layout','db','auth','catalog','commerce','documents','import-parts','importer','remote-import','api','shortcodes','admin'] as $mik_file) {

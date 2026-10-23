@@ -4,7 +4,7 @@ defined('ABSPATH') || exit;
 
 class Importer {
     public const CATALOG_MAX=104857600;
-    public const PACKAGE_MAX=1073741824;
+    public const PACKAGE_MAX=0; // Zero means no application-imposed byte limit for ZIP packages.
     public const CHUNK_MAX=2097152;
     public const IMAGE_EXTENSIONS=['jpg','jpeg','jpe','png','webp','gif','avif','bmp','dib','tif','tiff','ico','heic','heif'];
     private const PLANNER_VERSION=2;
@@ -46,7 +46,7 @@ class Importer {
         $kind=(string)($p['kind']??'');if(!in_array($kind,['catalog','package'],true)){throw new \InvalidArgumentException('Укажите тип файла: каталог или ZIP-пакет.');}
         foreach(['offset','total'] as $key){if(!isset($p[$key])||!preg_match('/^\d+$/D',(string)$p[$key])){throw new \InvalidArgumentException('Некорректные параметры фрагмента. Обновите страницу после установки обновления.');}}
         $offset=(int)$p['offset'];$total=(int)$p['total'];$size=(int)filesize($file['tmp_name']);$max=$kind==='catalog'?self::CATALOG_MAX:self::PACKAGE_MAX;
-        if($total<1||$total>$max){throw new \InvalidArgumentException($kind==='catalog'?'Каталог должен быть не пустым CSV размером до 100 МБ.':'ZIP-пакет должен быть размером до 1 ГБ.');}
+        if($total<1||($max>0&&$total>$max)){throw new \InvalidArgumentException($kind==='catalog'?'Каталог должен быть не пустым CSV размером до 100 МБ.':'ZIP-пакет не должен быть пустым.');}
         if($size<1||$size>self::CHUNK_MAX){throw new \InvalidArgumentException('Получен фрагмент '.size_format($size,2).', допустимо до 2 МБ. Перезагрузите страницу админки после обновления плагина и повторите загрузку.');}
         if($offset>$total||$size>$total-$offset){throw new \InvalidArgumentException('Границы фрагмента выходят за размер файла. Обновите страницу и повторите загрузку.');}
         $path=self::dir().'/'.get_current_user_id().'-'.$kind.'-'.$token.'.part';$h=fopen($path,'c+b');
@@ -81,7 +81,7 @@ class Importer {
             DB::require_result($wpdb->insert(DB::table('imports'),['file_path'=>$path,'headers'=>DB::json($headers),'created_at'=>DB::now(),'updated_at'=>DB::now()]));
             return ['offset'=>$length,'done'=>true,'id'=>(int)$wpdb->insert_id];
         }
-        if($length<1||$length>self::PACKAGE_MAX){throw new \InvalidArgumentException('ZIP-пакет должен быть размером до 1 ГБ.');}
+        if($length<1){throw new \InvalidArgumentException('ZIP-пакет не должен быть пустым.');}
         $number=self::accept_zip($id,$path);$job=self::status($id);$package=null;foreach($job['packages'] as $candidate){if((int)$candidate['package_no']===$number){$package=$candidate;break;}}
         return ['offset'=>$length,'done'=>true,'id'=>$id,'package'=>$number,'ready'=>$package&&in_array($package['status'],['uploaded','processing','done','done-errors'],true),'parts_received'=>(int)($package['parts_received']??0),'parts_total'=>(int)($package['parts_total']??0),'next_filename'=>$package['next_filename']??''];
     }
@@ -95,7 +95,7 @@ class Importer {
     }
     private static function plan_limit(array $p): int {
         $mb=filter_var($p['mb']??50,FILTER_VALIDATE_INT);
-        if($mb===false||$mb<1||$mb>1024){throw new \InvalidArgumentException('Укажите максимальный размер одного ZIP целым числом от 1 до 1024 МБ. Общий объём импорта не ограничивается этим значением.');}
+        if($mb===false||$mb<1||$mb>intdiv(PHP_INT_MAX,1048576)){throw new \InvalidArgumentException('Укажите ориентировочный размер ZIP положительным целым числом в МБ. Фактический размер архива может быть больше.');}
         return $mb*1048576;
     }
     /** Keep the old import and its ZIPs intact; a rebuilt plan has its own ID and tokens. */
@@ -147,7 +147,7 @@ class Importer {
         $j['processed']=(int)$wpdb->get_var($wpdb->prepare('SELECT COUNT(*) FROM '.DB::table('import_rows')." WHERE import_id=%d AND status='done'",$id));
         $j['error_count']=(int)$wpdb->get_var($wpdb->prepare('SELECT COUNT(*) FROM '.DB::table('import_rows')." WHERE import_id=%d AND status='error'",$id));
         $j['errors']=$wpdb->get_results($wpdb->prepare('SELECT id,package_no,legacy_id,error FROM '.DB::table('import_rows')." WHERE import_id=%d AND error IS NOT NULL AND error<>'' ORDER BY id DESC LIMIT 100",$id),ARRAY_A);
-        $pending=array_values(array_filter($j['packages'],fn($p)=>$p['selected']&&!in_array($p['status'],['done','done-errors'],true)));$j['next']=$pending[0]??null;if(!empty($j['next']['next_filename'])){$j['next']['filename']=$j['next']['next_filename'];}
+        $pending=array_values(array_filter($j['packages'],fn($p)=>$p['selected']&&!in_array($p['status'],['done','done-errors'],true)));$j['next']=$pending[0]??null;
         $j['bat_url']=add_query_arg('_wpnonce',wp_create_nonce('mik_packager'),admin_url('admin-post.php?action=mik_document&kind=packager&id='.$id));return $j;
     }
     private static function select(int $id,array $ids): array {
@@ -158,7 +158,7 @@ class Importer {
     private static function token(array $j,int $number): string { return hash_hmac('sha256',$j['id'].'|'.$number.'|'.hash_file('sha256',$j['file_path']),wp_salt('auth')); }
     public static function bat(int $id): string {
         global $wpdb;$j=self::job($id);if($j['status']!=='ready'){throw new \InvalidArgumentException('План ещё не готов.');}
-        $packages=$wpdb->get_results($wpdb->prepare('SELECT * FROM '.DB::table('packages').' WHERE import_id=%d AND selected=1 ORDER BY package_no',$id),ARRAY_A);$plan=['job_id'=>$id,'max_bytes'=>(int)$j['plan_bytes'],'image_extensions'=>self::IMAGE_EXTENSIONS,'packages'=>[]];
+        $packages=$wpdb->get_results($wpdb->prepare('SELECT * FROM '.DB::table('packages').' WHERE import_id=%d AND selected=1 ORDER BY package_no',$id),ARRAY_A);$plan=['job_id'=>$id,'max_bytes'=>(int)$j['plan_bytes'],'image_extensions'=>self::IMAGE_EXTENSIONS,'size_mode'=>'estimate','packages'=>[]];
         foreach($packages as $p){
             $files=[];$offset=0;
             if((int)($j['planner_version']??1)>=self::PLANNER_VERSION){$files=$wpdb->get_results($wpdb->prepare('SELECT path,file_size AS size FROM '.DB::table('plan_assets').' WHERE import_id=%d AND package_no=%d ORDER BY path_hash',$id,$p['package_no']),ARRAY_A);foreach($files as &$file){$file['size']=(int)$file['size'];}unset($file);}
@@ -183,25 +183,35 @@ class Importer {
             if((int)($m['job_id']??0)!==$id||!hash_equals(self::token($j,$n),(string)($m['token']??''))){throw new \InvalidArgumentException('Этот пакет не принадлежит выбранному импорту.');}
             $p=$wpdb->get_row($wpdb->prepare('SELECT * FROM '.DB::table('packages').' WHERE import_id=%d AND package_no=%d',$id,$n),ARRAY_A);
             if(!$p||!$p['selected']){throw new \InvalidArgumentException('Пакет не выбран в плане.');}
-            if(filesize($path)>(int)$j['plan_bytes']){throw new \InvalidArgumentException('Размер ZIP превышает выбранный максимум одного архива. Скачайте новый BAT и используйте ZIP-части.');}
             $size=0;if($z->numFiles>20000){throw new \InvalidArgumentException('Слишком много файлов в ZIP.');}
             for($i=0;$i<$z->numFiles;$i++){
                 $s=$z->statIndex($i);$name=$s['name'];if($name!=='manifest.json'){self::valid_path($name);if(!isset($m['files'][$name])){throw new \InvalidArgumentException('Лишний файл в пакете.');}}
                 $size+=$s['size'];if($s['size']>1048576&&$s['comp_size']>0&&$s['size']/$s['comp_size']>500){throw new \InvalidArgumentException('Недопустимая степень сжатия ZIP.');}
                 if($z->getExternalAttributesIndex($i,$opsys,$attrs)&&($attrs>>16&0170000)===0120000){throw new \InvalidArgumentException('Символические ссылки запрещены.');}
             }
-            if($size>(int)$j['plan_bytes']*2+2097152){throw new \InvalidArgumentException('Распакованный пакет превышает лимит плана.');}
             foreach($m['files'] as $actual=>$file){self::valid_path((string)$actual);$entry=$z->statName($actual);if(!is_array($file)||!$entry||!preg_match('/^[a-f0-9]{64}$/D',(string)($file['sha256']??''))||(int)($file['size']??-1)!==(int)$entry['size']){throw new \InvalidArgumentException('Некорректные сведения о файле: '.sanitize_text_field((string)$actual));}}
             if((int)($m['version']??1)===3){ImportParts::register($id,$p,$path,$m);return $n;}
-            if((int)($p['parts_total']??0)>0){throw new \InvalidArgumentException('Для этого пакета уже загружаются ZIP-части. Используйте файлы из той же сборки BAT.');}
-            if(in_array($p['status'],['done','done-errors'],true)){return $n;}
-            $wpdb->update(DB::table('packages'),['zip_path'=>$path,'status'=>'uploaded'],['import_id'=>$id,'package_no'=>$n]);return $n;
+            self::accept_whole($id,$n,$path);return $n;
         }finally{$z->close();}
+    }
+    /** A complete archive replaces an unprocessed multipart transfer of the same planned package. */
+    private static function accept_whole(int $id,int $number,string $path): void {
+        global $wpdb;
+        $unused=self::lock($id,fn()=>DB::transaction(function()use($wpdb,$id,$number,$path){
+            $table=DB::table('packages');$p=$wpdb->get_row($wpdb->prepare("SELECT * FROM $table WHERE import_id=%d AND package_no=%d FOR UPDATE",$id,$number),ARRAY_A);
+            if(!$p||!$p['selected']){throw new \InvalidArgumentException('Пакет не выбран в плане.');}
+            if(in_array($p['status'],['done','done-errors'],true)){return [];}
+            if($p['status']==='processing'){if($p['zip_path']===$path){return [];}throw new \InvalidArgumentException('Этот пакет уже обрабатывается. Для изменения его файлов создайте новый план.');}
+            $old=$wpdb->get_col($wpdb->prepare('SELECT zip_path FROM '.DB::table('package_parts').' WHERE import_id=%d AND package_no=%d',$id,$number));if(!empty($p['zip_path'])){$old[]=$p['zip_path'];}
+            DB::require_result($wpdb->delete(DB::table('package_media'),['import_id'=>$id,'package_no'=>$number]));DB::require_result($wpdb->delete(DB::table('package_parts'),['import_id'=>$id,'package_no'=>$number]));
+            DB::require_result($wpdb->update($table,['zip_path'=>$path,'status'=>'uploaded','parts_total'=>0,'part_set'=>''],['import_id'=>$id,'package_no'=>$number]));return $old;
+        }));
+        $directory=self::dir().'/';foreach(array_unique($unused) as $old){if($old!==$path&&str_starts_with($old,$directory)&&is_file($old)){@unlink($old);}}
     }
     private static function step(int $id,int $number): array {
         global $wpdb;$j=self::job($id);$p=$wpdb->get_row($wpdb->prepare('SELECT * FROM '.DB::table('packages').' WHERE import_id=%d AND package_no=%d',$id,$number),ARRAY_A);
         if($p&&$p['selected']&&in_array($p['status'],['done','done-errors'],true)){return self::status($id);}
-        if(!$p||!$p['selected']||!in_array($p['status'],['uploaded','processing'],true)){throw new \InvalidArgumentException('Сначала загрузите все ZIP-части выбранного пакета.');}
+        if(!$p||!$p['selected']||!in_array($p['status'],['uploaded','processing'],true)){throw new \InvalidArgumentException('Сначала загрузите ZIP выбранного пакета.');}
         $files=new ImportFiles($id,$p);
         $rows=$wpdb->get_results($wpdb->prepare('SELECT * FROM '.DB::table('import_rows')." WHERE import_id=%d AND package_no=%d AND status='pending' ORDER BY id LIMIT 8",$id,$number),ARRAY_A);$start=microtime(true);
         $wpdb->update(DB::table('packages'),['status'=>'processing'],['import_id'=>$id,'package_no'=>$number]);

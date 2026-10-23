@@ -61,7 +61,7 @@ class RemoteImport {
         $v=wp_remote_retrieve_header($response,$name);return is_array($v)?implode(',',$v):(string)$v;
     }
     private static function step(array $s): array {
-        $paths=self::paths($s['token']);$max=$s['kind']==='catalog'?Importer::CATALOG_MAX:Importer::PACKAGE_MAX;
+        $paths=self::paths($s['token']);$max=$s['kind']==='catalog'?Importer::CATALOG_MAX:PHP_INT_MAX-1;
         clearstatcache(true,$paths['part']);$offset=is_file($paths['part'])?(int)filesize($paths['part']):0;$s['offset']=$offset;
         if($offset>$max){throw new \InvalidArgumentException('Файл превышает допустимый размер.');}
         if($s['mode']==='stream'){return self::whole($s,$paths,$max);}
@@ -80,7 +80,7 @@ class RemoteImport {
             if($code===200){
                 if($offset){throw new \InvalidArgumentException('Источник перестал поддерживать продолжение скачивания. Загрузите этот ZIP с компьютера.');}
                 $length=self::header($r,'content-length');$total=ctype_digit($length)?(int)$length:0;
-                if($total>$max){throw new \InvalidArgumentException($s['kind']==='catalog'?'CSV по ссылке превышает 100 МБ.':'ZIP по ссылке превышает 1 ГБ. Используйте отдельный пакет импорта.');}
+                if($total>$max){throw new \InvalidArgumentException($s['kind']==='catalog'?'CSV по ссылке превышает 100 МБ.':'Размер ZIP превышает возможности файловой системы сервера.');}
                 if($bytes>$window||($total&&$total>$bytes)){
                     // Servers without Range support still work through a bounded streaming download.
                     $s['mode']='stream';$s['total']=$total;self::save($s);return self::public_state($s);
@@ -92,7 +92,7 @@ class RemoteImport {
             if(!preg_match('~^bytes\s+(\d+)-(\d+)/(\d+|\*)$~i',trim(self::header($r,'content-range')),$m)){throw new \InvalidArgumentException('Источник вернул некорректный диапазон файла. Используйте другую ссылку или загрузку с компьютера.');}
             $start=(int)$m[1];$end=(int)$m[2];$total=$m[3]==='*'?0:(int)$m[3];
             if($start!==$offset||$end<$start||$end-$start+1!==$bytes||$bytes>$window||!$bytes){throw new \RuntimeException('Скачанный фрагмент неполный. Нажмите «Продолжить скачивание».');}
-            if($total>$max||$offset+$bytes>$max){throw new \InvalidArgumentException('Файл по ссылке превышает лимит: '.($s['kind']==='catalog'?'100 МБ для CSV.':'1 ГБ для ZIP.'));}
+            if($total>$max||$offset+$bytes>$max){throw new \InvalidArgumentException('Файл по ссылке превышает лимит: '.($s['kind']==='catalog'?'100 МБ для CSV.':'предельные возможности файловой системы сервера для ZIP.'));}
             if($total&&$end>=$total){throw new \InvalidArgumentException('Источник сообщил неверный размер файла.');}
             if($s['total']&&$total&&(int)$s['total']!==$total){throw new \InvalidArgumentException('Размер файла изменился. Начните скачивание заново.');}
             if($total){$s['total']=$total;}
