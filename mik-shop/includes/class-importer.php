@@ -6,6 +6,8 @@ class Importer {
     public const CATALOG_MAX=104857600;
     public const PACKAGE_MAX=1073741824;
     public const CHUNK_MAX=2097152;
+    private const PLANNER_VERSION=2;
+    private const MANIFEST_MAX=8388608;
     public static function dir(): string {
         $base=trailingslashit(get_temp_dir()).'mik-shop-'.substr(hash_hmac('sha256',home_url(),wp_salt('auth')),0,20);
         if(!is_dir($base)&&!wp_mkdir_p($base)){throw new \RuntimeException('Нет доступа к временной папке PHP.');}
@@ -21,6 +23,7 @@ class Importer {
         if($action==='upload'){return self::upload($r);}
         if(str_starts_with($action,'remote-')){return RemoteImport::dispatch(substr($action,7),$p);}
         if($action==='plan'){return self::lock($id,fn()=>self::plan($id,$p));}
+        if($action==='replan'){return self::lock($id,fn()=>self::replan($id,$p));}
         if($action==='plan-step'){return self::lock($id,fn()=>DB::transaction(fn()=>self::plan_step($id)));}
         if($action==='select'){return DB::transaction(fn()=>self::select($id,(array)($p['packages']??[])));}
         if($action==='step'){return self::lock($id,fn()=>self::step($id,absint($p['package']??0)));}
@@ -84,24 +87,48 @@ class Importer {
         global $wpdb;$j=$wpdb->get_row($wpdb->prepare('SELECT * FROM '.DB::table('imports').' WHERE id=%d',$id),ARRAY_A);if(!$j||!is_file($j['file_path'])){throw new \InvalidArgumentException('Каталог импорта не найден. Загрузите CSV заново.');}return $j;
     }
     private static function plan(int $id,array $p): array {
-        global $wpdb;$j=self::job($id);if($j['status']!=='uploaded'){throw new \InvalidArgumentException('План уже создан. Для другого размера пакетов загрузите каталог заново.');}
-        $mb=max(1,min(1024,(int)($p['mb']??50)));$f=fopen($j['file_path'],'rb');fgetcsv($f,0,';','"','');$offset=ftell($f);fclose($f);
-        $wpdb->update(DB::table('imports'),['status'=>'planning','plan_bytes'=>$mb*1048576,'byte_offset'=>$offset,'current_package'=>1,'package_bytes'=>0,'updated_at'=>DB::now()],['id'=>$id]);return self::status($id);
+        global $wpdb;$j=self::job($id);if($j['status']!=='uploaded'){throw new \InvalidArgumentException('План уже создан. Для другого размера ZIP используйте «Пересчитать пакеты».');}
+        $limit=self::plan_limit($p);$f=fopen($j['file_path'],'rb');fgetcsv($f,0,';','"','');$offset=ftell($f);fclose($f);
+        DB::require_result($wpdb->update(DB::table('imports'),['status'=>'planning','plan_bytes'=>$limit,'planner_version'=>self::PLANNER_VERSION,'byte_offset'=>$offset,'current_package'=>1,'package_bytes'=>0,'updated_at'=>DB::now()],['id'=>$id]));return self::status($id);
+    }
+    private static function plan_limit(array $p): int {
+        $mb=filter_var($p['mb']??50,FILTER_VALIDATE_INT);
+        if($mb===false||$mb<1||$mb>1024){throw new \InvalidArgumentException('Укажите максимальный размер одного ZIP целым числом от 1 до 1024 МБ. Общий объём импорта не ограничивается этим значением.');}
+        return $mb*1048576;
+    }
+    /** Keep the old import and its ZIPs intact; a rebuilt plan has its own ID and tokens. */
+    private static function replan(int $id,array $p): array {
+        global $wpdb;self::plan_limit($p);$j=self::job($id);$path=self::dir().'/'.get_current_user_id().'-catalog-'.bin2hex(random_bytes(16)).'.part';
+        if(!copy($j['file_path'],$path)){@unlink($path);throw new \RuntimeException('Не удалось подготовить каталог для нового плана. Проверьте свободное место.');}
+        @chmod($path,0600);
+        try{return DB::transaction(function()use($wpdb,$path,$j,$p){
+            DB::require_result($wpdb->insert(DB::table('imports'),['file_path'=>$path,'headers'=>$j['headers'],'created_at'=>DB::now(),'updated_at'=>DB::now()]));
+            return self::plan((int)$wpdb->insert_id,$p);
+        });}catch(\Throwable $e){@unlink($path);throw $e;}
+    }
+    /** Conservative cost of one unique ZIP member, including the directory and JSON manifest. */
+    private static function asset_cost(string $path,int $size): int {
+        return $size+(int)ceil($size/16384)*5+512+6*strlen($path);
     }
     private static function plan_step(int $id): array {
         global $wpdb;$j=self::job($id);if($j['status']!=='planning'){return self::status($id);}
-        $headers=json_decode($j['headers'],true);$f=fopen($j['file_path'],'rb');fseek($f,(int)$j['byte_offset']);$limit=(int)floor($j['plan_bytes']*.88)-4096;$number=(int)$j['current_package'];$bytes=(int)$j['package_bytes'];$total=(int)$j['total_rows'];$count=0;$started=microtime(true);
+        if((int)($j['planner_version']??1)!==self::PLANNER_VERSION){throw new \InvalidArgumentException('Этот план создан старой версией. Нажмите «Пересчитать пакеты», чтобы применить размер к одному архиву.');}
+        $headers=json_decode($j['headers'],true);$f=fopen($j['file_path'],'rb');fseek($f,(int)$j['byte_offset']);$limit=(int)floor($j['plan_bytes']*.98)-4096;$number=(int)$j['current_package'];$bytes=(int)$j['package_bytes'];$total=(int)$j['total_rows'];$count=0;$started=microtime(true);$known=[];$asset_table=DB::table('plan_assets');
+        foreach($wpdb->get_results($wpdb->prepare("SELECT path_hash,file_size FROM $asset_table WHERE import_id=%d AND package_no=%d",$id,$number),ARRAY_A) as $a){$known[$a['path_hash']]=(int)$a['file_size'];}
         $row_count=(int)$wpdb->get_var($wpdb->prepare('SELECT rows_count FROM '.DB::table('packages').' WHERE import_id=%d AND package_no=%d',$id,$number));
         while($count<150&&($values=fgetcsv($f,0,';','"',''))!==false){
             if(count($values)===1&&trim((string)$values[0])===''){continue;}
             if(count($values)!==count($headers)){fclose($f);throw new \InvalidArgumentException('Число колонок не совпадает в строке '.($total+2).'. Исправьте CSV.');}
             $row=array_combine($headers,$values);if(!trim($row['sku'])||!trim($row['name'])){continue;}
             $assets=json_decode($row['assets_json']??'[]',true);if(!is_array($assets)){fclose($f);throw new \InvalidArgumentException('Некорректный assets_json у '.$row['sku']);}
-            $size=2048;foreach($assets as $a){self::valid_path((string)($a['path']??''));$size+=max(0,(int)($a['size']??0));}
-            if($size>$limit){fclose($f);throw new \InvalidArgumentException('Товар '.$row['sku'].' требует около '.ceil($size/1048576).' МБ. Для него нужен больший размер пакета. Загрузите каталог заново с большим лимитом.');}
-            if($row_count&&($bytes+$size>$limit||$row_count>=500)){$number++;$bytes=0;$row_count=0;}
+            $unique=[];foreach($assets as $a){if(!is_array($a)){fclose($f);throw new \InvalidArgumentException('Некорректный список файлов у '.$row['sku']);}$path=self::valid_path((string)($a['path']??''));$size=max(0,(int)($a['size']??0));$hash=hash('sha256',$path);$unique[$hash]=['path'=>$path,'size'=>max($size,$unique[$hash]['size']??0)];}
+            $size=0;$delta=0;foreach($unique as $hash=>$a){$cost=self::asset_cost($a['path'],$a['size']);$size+=$cost;$delta+=isset($known[$hash])?max(0,$cost-self::asset_cost($a['path'],$known[$hash])):$cost;}
+            if($size>$limit){fclose($f);throw new \InvalidArgumentException('Товар '.$row['sku'].' требует около '.ceil($size/1048576).' МБ. Для него нужен больший размер одного ZIP. Пересчитайте пакеты с большим лимитом.');}
+            // Only the per-archive byte budget splits the catalogue. Products are still processed in small REST batches.
+            if($row_count&&$bytes+$delta>$limit){$number++;$bytes=0;$row_count=0;$known=[];$delta=$size;}
             DB::require_result($wpdb->insert(DB::table('import_rows'),['import_id'=>$id,'package_no'=>$number,'legacy_id'=>sanitize_text_field($row['legacy_id']),'row_json'=>DB::json($row),'status'=>'pending']));
-            $bytes+=$size;$row_count++;$total++;$count++;
+            foreach($unique as $hash=>$a){if(!isset($known[$hash])||$a['size']>$known[$hash]){DB::require_result($wpdb->query($wpdb->prepare("INSERT INTO $asset_table (import_id,package_no,path_hash,path,file_size) VALUES (%d,%d,%s,%s,%d) ON DUPLICATE KEY UPDATE file_size=GREATEST(file_size,VALUES(file_size))",$id,$number,$hash,$a['path'],$a['size'])));$known[$hash]=$a['size'];}}
+            $bytes+=$delta;$row_count++;$total++;$count++;
             $filename='mik-'.$id.'-'.str_pad((string)$number,4,'0',STR_PAD_LEFT).'.zip';
             $wpdb->query($wpdb->prepare('INSERT INTO '.DB::table('packages').' (import_id,package_no,filename,estimated_bytes,rows_count) VALUES (%d,%d,%s,%d,%d) ON DUPLICATE KEY UPDATE estimated_bytes=VALUES(estimated_bytes),rows_count=VALUES(rows_count)',$id,$number,$filename,$bytes,$row_count));
             if(microtime(true)-$started>6){break;}
@@ -110,10 +137,11 @@ class Importer {
     }
     public static function status(int $id): array {
         global $wpdb;if(!$id){return ['jobs'=>$wpdb->get_results('SELECT id,status,total_rows,created_at FROM '.DB::table('imports').' ORDER BY id DESC LIMIT 20',ARRAY_A)];}
-        $j=$wpdb->get_row($wpdb->prepare('SELECT id,status,total_rows,plan_bytes,created_at FROM '.DB::table('imports').' WHERE id=%d',$id),ARRAY_A);if(!$j){throw new \InvalidArgumentException('Импорт не найден.');}
-        foreach(['id','total_rows','plan_bytes'] as $key){$j[$key]=(int)$j[$key];}
+        $j=$wpdb->get_row($wpdb->prepare('SELECT id,status,total_rows,plan_bytes,planner_version,created_at FROM '.DB::table('imports').' WHERE id=%d',$id),ARRAY_A);if(!$j){throw new \InvalidArgumentException('Импорт не найден.');}
+        foreach(['id','total_rows','plan_bytes','planner_version'] as $key){$j[$key]=(int)$j[$key];}
         $j['packages']=$wpdb->get_results($wpdb->prepare('SELECT package_no,filename,estimated_bytes,rows_count,selected,status FROM '.DB::table('packages').' WHERE import_id=%d ORDER BY package_no',$id),ARRAY_A);
         foreach($j['packages'] as &$package){foreach(['package_no','estimated_bytes','rows_count','selected'] as $key){$package[$key]=(int)$package[$key];}}unset($package);
+        $j['estimated_total_bytes']=array_sum(array_column($j['packages'],'estimated_bytes'));
         $j['processed']=(int)$wpdb->get_var($wpdb->prepare('SELECT COUNT(*) FROM '.DB::table('import_rows')." WHERE import_id=%d AND status='done'",$id));
         $j['error_count']=(int)$wpdb->get_var($wpdb->prepare('SELECT COUNT(*) FROM '.DB::table('import_rows')." WHERE import_id=%d AND status='error'",$id));
         $j['errors']=$wpdb->get_results($wpdb->prepare('SELECT id,package_no,legacy_id,error FROM '.DB::table('import_rows')." WHERE import_id=%d AND error IS NOT NULL AND error<>'' ORDER BY id DESC LIMIT 100",$id),ARRAY_A);
@@ -131,7 +159,8 @@ class Importer {
         $packages=$wpdb->get_results($wpdb->prepare('SELECT * FROM '.DB::table('packages').' WHERE import_id=%d AND selected=1 ORDER BY package_no',$id),ARRAY_A);$plan=['job_id'=>$id,'max_bytes'=>(int)$j['plan_bytes'],'packages'=>[]];
         foreach($packages as $p){
             $files=[];$offset=0;
-            do{$rows=$wpdb->get_col($wpdb->prepare('SELECT row_json FROM '.DB::table('import_rows').' WHERE import_id=%d AND package_no=%d ORDER BY id LIMIT 200 OFFSET %d',$id,$p['package_no'],$offset));foreach($rows as $raw){$row=json_decode($raw,true);foreach(json_decode($row['assets_json']??'[]',true)?:[] as $a){$path=self::valid_path($a['path']);$files[$path]=['path'=>$path,'size'=>(int)$a['size']];}}$offset+=200;}while(count($rows)===200);
+            if((int)($j['planner_version']??1)>=self::PLANNER_VERSION){$files=$wpdb->get_results($wpdb->prepare('SELECT path,file_size AS size FROM '.DB::table('plan_assets').' WHERE import_id=%d AND package_no=%d ORDER BY path_hash',$id,$p['package_no']),ARRAY_A);foreach($files as &$file){$file['size']=(int)$file['size'];}unset($file);}
+            else{do{$rows=$wpdb->get_col($wpdb->prepare('SELECT row_json FROM '.DB::table('import_rows').' WHERE import_id=%d AND package_no=%d ORDER BY id LIMIT 200 OFFSET %d',$id,$p['package_no'],$offset));foreach($rows as $raw){$row=json_decode($raw,true);foreach(json_decode($row['assets_json']??'[]',true)?:[] as $a){$path=self::valid_path($a['path']);$files[$path]=['path'=>$path,'size'=>(int)$a['size']];}}$offset+=200;}while(count($rows)===200);}
             $plan['packages'][]=['number'=>(int)$p['package_no'],'filename'=>$p['filename'],'token'=>self::token($j,(int)$p['package_no']),'files'=>array_values($files)];
         }
         $payload=base64_encode(gzencode(DB::json($plan),9));$ps=file_get_contents(MIK_PATH.'assets/packager.ps1');
@@ -146,7 +175,7 @@ class Importer {
     private static function accept_zip(int $id,string $path): int {
         global $wpdb;if(!class_exists('ZipArchive')){throw new \RuntimeException('На хостинге необходимо включить PHP ZipArchive.');}$j=self::job($id);$z=new \ZipArchive();if($z->open($path)!==true){throw new \InvalidArgumentException('Повреждён ZIP.');}
         try{
-            $stat=$z->statName('manifest.json');if(!$stat||$stat['size']>2097152){throw new \InvalidArgumentException('В ZIP отсутствует допустимый manifest.json.');}
+            $stat=$z->statName('manifest.json');if(!$stat||$stat['size']>self::MANIFEST_MAX){throw new \InvalidArgumentException('В ZIP отсутствует допустимый manifest.json.');}
             $m=json_decode($z->getFromName('manifest.json'),true);$n=absint($m['package_no']??0);
             if((int)($m['job_id']??0)!==$id||!hash_equals(self::token($j,$n),(string)($m['token']??''))){throw new \InvalidArgumentException('Этот пакет не принадлежит выбранному импорту.');}
             $p=$wpdb->get_row($wpdb->prepare('SELECT * FROM '.DB::table('packages').' WHERE import_id=%d AND package_no=%d',$id,$n),ARRAY_A);
