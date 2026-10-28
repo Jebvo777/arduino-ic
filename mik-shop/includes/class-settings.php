@@ -15,7 +15,8 @@ class Settings {
             'logo_url'=>'','logo_dark_url'=>'','hero_cycle'=>true,'hero_photos'=>['store-hero-circuits.webp','store-hero-chip.webp'],
             'header_categories'=>['limit'=>8,'ids'=>[]],'category_cards'=>['limit'=>8,'ids'=>[]],
             'footer'=>['description'=>'Электронные компоненты для ремонта, разработки и производства.','copyright'=>'Интернет-магазин электронных компонентов.','category_limit'=>8,'category_ids'=>[]],
-            'per_page'=>24, 'seller'=>['name'=>'','inn'=>'','kpp'=>'','address'=>'','bank'=>'','bik'=>'','account'=>'','correspondent'=>''],
+            'per_page'=>24, 'catalog_title'=>'Каталог электронных компонентов', 'category_images'=>[],
+            'carousels'=>['hits'=>['title'=>'Хиты продаж','limit'=>12,'columns'=>4,'category'=>''],'new'=>['title'=>'Новые поступления','limit'=>12,'columns'=>4,'category'=>''],'repair'=>['title'=>'Для ремонта и разработки','limit'=>12,'columns'=>4,'category'=>'']], 'seller'=>['name'=>'','inn'=>'','kpp'=>'','address'=>'','bank'=>'','bik'=>'','account'=>'','correspondent'=>''],
             'colors'=>['background'=>'#F2F4F7','heading'=>'#242A33','text'=>'#454D59','muted'=>'#657080','accent'=>'#F85F03','secondary'=>'#02ADB3'],
             'heading_font'=>'Manrope', 'body_font'=>'Inter', 'load_fonts'=>true,
             'labels'=>['cart'=>'Корзина','wishlist'=>'Избранное','account'=>'Личный кабинет','catalog'=>'Каталог','search'=>'Маркировка, артикул или название','order_success'=>'Спасибо за заказ. Наш менеджер свяжется с вами.'],
@@ -61,7 +62,7 @@ class Settings {
     }
     public static function save(array $in): void {
         $clean=self::all();
-        foreach (['store_name','phone','hours_label','pickup_address','tax_label','heading_font','body_font'] as $key) {
+        foreach (['store_name','phone','hours_label','pickup_address','tax_label','heading_font','body_font','catalog_title'] as $key) {
             if (isset($in[$key])) { $clean[$key]=sanitize_text_field($in[$key]); }
         }
         foreach (['cart','wishlist','account','shop','company','purchase','payment','delivery','wholesale','business','help','legal','contacts'] as $type) { if(isset($in[$type.'_slug'])){$clean[$type.'_slug']=sanitize_title($in[$type.'_slug']);} }
@@ -101,6 +102,9 @@ class Settings {
         if(array_key_exists('hero_cycle',$in)){$clean['hero_cycle']=(bool)$in['hero_cycle'];}
         if(isset($in['hero_photos'])){$photos=array_values((array)$in['hero_photos']);$clean['hero_photos']=[];foreach(array_slice($photos,0,2) as $photo){$clean['hero_photos'][]=preg_match('~^https?://~i',$photo)?esc_url_raw($photo):sanitize_file_name($photo);}if(!$clean['hero_photos']){$clean['hero_photos']=self::defaults()['hero_photos'];}}
         foreach(['header_categories','category_cards'] as $section){if(isset($in[$section])){$r=(array)$in[$section];$ids=is_array($r['ids']??null)?$r['ids']:explode(',',(string)($r['ids']??''));$clean[$section]=['limit'=>max(1,min(24,(int)($r['limit']??8))),'ids'=>array_values(array_filter(array_map('absint',$ids)))];}}
+        if(isset($in['category_images'])){foreach(CategoryArt::NODES as $key=>$node){$clean['category_images'][$key]=esc_url_raw($in['category_images'][$key]??'');}delete_transient('mik_category_art_v140');Catalog::invalidate_categories();}
+        if(isset($in['carousels'])){foreach(['hits','new','repair'] as $key){$row=(array)($in['carousels'][$key]??[]);$clean['carousels'][$key]=['title'=>sanitize_text_field($row['title']??$clean['carousels'][$key]['title']),'limit'=>max(1,min(60,(int)($row['limit']??12))),'columns'=>max(1,min(6,(int)($row['columns']??4))),'category'=>sanitize_text_field($row['category']??'')];}}
+        if(!$clean['catalog_title'])$clean['catalog_title']=self::defaults()['catalog_title'];
         update_option('mik_settings',$clean,false);
     }
     public static function hours(): array {

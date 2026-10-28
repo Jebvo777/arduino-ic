@@ -84,8 +84,7 @@ class Layout {
     public static function brand(bool $dark=false): string {
         $s=Settings::all();$url=$dark?$s['logo_dark_url']:$s['logo_url'];$url=$url?:MIK_URL.'assets/img/'.($dark?'store-logo-dark.svg':'store-logo.svg');
         $image='<img class="mik-brand-image" src="'.esc_url($url).'" alt="Купить микросхемы и транзисторы" width="345" height="80">';
-        $cloud=$dark?'':'<svg class="mik-brand-illustration" xmlns="http://www.w3.org/2000/svg" width="304" height="94" viewBox="55 345 1530 475" role="img" aria-label="Electronic Component"><image href="'.esc_url(MIK_URL.'assets/img/electronic-components.webp').'" x="0" y="0" width="1631" height="1178"/></svg>';
-        return '<a class="mik-brand'.($dark?' is-dark':'').'" href="'.esc_url(home_url('/')).'" aria-label="Купить микросхемы и транзисторы — главная">'.$image.$cloud.'</a>';
+        return '<a class="mik-brand'.($dark?' is-dark':'').'" href="'.esc_url(home_url('/')).'" aria-label="Купить микросхемы и транзисторы — главная">'.$image.'</a>';
     }
     public static function nav(array $keys,string $class=''): string {
         $nav=Settings::navigation();$out='<nav class="'.esc_attr($class).'">';
