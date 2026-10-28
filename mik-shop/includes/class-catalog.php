@@ -10,6 +10,8 @@ class Catalog {
         add_action('woocommerce_product_set_stock',function($p){self::sync_stock($p->get_id());});
         add_action('add_meta_boxes',function(){add_meta_box('mik-product','MIK Shop — параметры и ссылки',[self::class,'metabox'],'product','normal');});
         add_action('woocommerce_process_product_meta',[self::class,'save_meta']);
+        foreach(['created_product_cat','edited_product_cat','delete_product_cat'] as $hook){add_action($hook,[self::class,'invalidate_categories']);}
+        add_action('set_object_terms',function($id,$terms,$tt_ids,$taxonomy){if($taxonomy==='product_cat'){self::invalidate_categories();}},10,4);
         // Group prices are private. Standard WooCommerce exports/endpoints expose the public base price only.
     }
     public static function group(): array {
@@ -84,9 +86,18 @@ class Catalog {
         $ids=$wpdb->get_col('SELECT p.ID'.$sql.' ORDER BY '.$order.' LIMIT '.(int)$limit.' OFFSET '.(($page-1)*$limit));
         return ['items'=>array_values(array_filter(array_map(fn($id)=>self::product((int)$id),$ids))),'total'=>$total,'page'=>$page,'pages'=>(int)ceil($total/$limit),'group'=>Auth::customer()?$g['name']:null,'currency'=>$g['currency']];
     }
+    public static function invalidate_categories(): void { delete_transient('mik_categories_v130'); }
     public static function categories(): array {
+        $cached=get_transient('mik_categories_v130');if(is_array($cached)){return $cached;}
         $terms=get_terms(['taxonomy'=>'product_cat','hide_empty'=>false,'number'=>0,'orderby'=>'name','order'=>'ASC']);if(is_wp_error($terms)){return [];}
-        return array_map(function($t){$url=get_term_link($t);$image=(int)get_term_meta($t->term_id,'thumbnail_id',true);return ['id'=>$t->term_id,'parent'=>$t->parent,'name'=>$t->name,'slug'=>$t->slug,'count'=>$t->count,'url'=>is_wp_error($url)?Settings::url('shop'):$url,'image'=>$image?wp_get_attachment_image_url($image,'medium'):''];},$terms);
+        $terms=array_values(array_filter($terms,fn($t)=>!get_term_meta($t->term_id,'_mik_archived',true)));$by=[];$images=[];
+        foreach($terms as $t){$by[(int)$t->term_id]=$t;$own=(int)get_term_meta($t->term_id,'thumbnail_id',true);if($own&&wp_attachment_is_image($own)){$images[(int)$t->term_id]=$own;}}
+        global $wpdb;$fallback=$wpdb->get_results("SELECT tt.term_id,MIN(CAST(pm.meta_value AS UNSIGNED)) AS image FROM {$wpdb->term_taxonomy} tt JOIN {$wpdb->term_relationships} tr ON tr.term_taxonomy_id=tt.term_taxonomy_id JOIN {$wpdb->posts} p ON p.ID=tr.object_id AND p.post_type='product' AND p.post_status='publish' JOIN {$wpdb->postmeta} pm ON pm.post_id=p.ID AND pm.meta_key='_thumbnail_id' AND CAST(pm.meta_value AS UNSIGNED)>0 JOIN {$wpdb->posts} a ON a.ID=CAST(pm.meta_value AS UNSIGNED) AND a.post_type='attachment' AND a.post_mime_type LIKE 'image/%' LEFT JOIN {$wpdb->postmeta} f ON f.post_id=a.ID AND f.meta_key='_wp_attached_file' WHERE tt.taxonomy='product_cat' AND (f.meta_value IS NULL OR f.meta_value NOT LIKE '%woocommerce-placeholder%') GROUP BY tt.term_id",ARRAY_A);
+        foreach($fallback as $r){if(isset($by[(int)$r['term_id']])&&!isset($images[(int)$r['term_id']])){$images[(int)$r['term_id']]=(int)$r['image'];}}
+        foreach($terms as $t){$image=$images[(int)$t->term_id]??0;$parent=(int)$t->parent;$seen=[];while($image&&$parent&&isset($by[$parent])&&!isset($seen[$parent])){$seen[$parent]=true;if(!isset($images[$parent]))$images[$parent]=$image;$parent=(int)$by[$parent]->parent;}}
+        $image_ids=array_values(array_unique($images));if($image_ids){get_posts(['post_type'=>'attachment','post_status'=>'inherit','post__in'=>$image_ids,'posts_per_page'=>-1,'update_post_meta_cache'=>true,'update_post_term_cache'=>false]);}
+        $out=[];foreach($terms as $t){$url=get_term_link($t);$image=$images[(int)$t->term_id]??0;$out[]=['id'=>(int)$t->term_id,'parent'=>(int)$t->parent,'name'=>$t->name,'slug'=>$t->slug,'count'=>(int)$t->count,'url'=>is_wp_error($url)?Settings::url('shop'):$url,'image'=>$image?(wp_get_attachment_image_url($image,'medium')?:''):'','key'=>(string)get_term_meta($t->term_id,'_mik_tree_key',true),'order'=>(int)get_term_meta($t->term_id,'_mik_order',true)];}
+        usort($out,fn($a,$b)=>(($a['order']?:999999)<=>($b['order']?:999999))?:strnatcasecmp($a['name'],$b['name']));$children=[];$known=array_column($out,'id');foreach($out as $c){$parent=in_array($c['parent'],$known,true)?$c['parent']:0;$children[$parent][]=$c;}$ordered=[];$seen=[];$walk=function($parent)use(&$walk,&$ordered,&$seen,$children){foreach($children[$parent]??[] as $c){if(isset($seen[$c['id']]))continue;$seen[$c['id']]=true;$ordered[]=$c;$walk($c['id']);}};$walk(0);foreach($out as $c){if(!isset($seen[$c['id']]))$ordered[]=$c;}set_transient('mik_categories_v130',$ordered,600);return $ordered;
     }
     public static function filters(): array {
         global $wpdb;$rows=$wpdb->get_results('SELECT param_key,label,value,unit FROM '.DB::table('specs').' GROUP BY param_key,label,value,unit ORDER BY label,value LIMIT 600',ARRAY_A);$out=[];

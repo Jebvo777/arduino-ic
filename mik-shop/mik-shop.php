@@ -2,7 +2,7 @@
 /**
  * Plugin Name: MIK Shop
  * Description: Магазин MIK: собственные кабинеты, корзина, избранное, заказы и пакетный импорт; товары WooCommerce.
- * Version: 1.2.4
+ * Version: 1.3.0
  * Requires at least: 6.5
  * Requires PHP: 8.0
  * Requires Plugins: woocommerce
@@ -11,10 +11,10 @@
  * Text Domain: mik-shop
  */
 defined('ABSPATH') || exit;
-define('MIK_VERSION', '1.2.4');
+define('MIK_VERSION', '1.3.0');
 define('MIK_PATH', plugin_dir_path(__FILE__));
 define('MIK_URL', plugin_dir_url(__FILE__));
-foreach (['settings','layout','db','auth','catalog','commerce','documents','import-parts','importer','remote-import','api','shortcodes','admin'] as $mik_file) {
+foreach (['settings','layout','db','auth','catalog','category-tree','category-jobs','commerce','documents','import-parts','importer','remote-import','api','shortcodes','admin'] as $mik_file) {
     require_once MIK_PATH . 'includes/class-' . $mik_file . '.php';
 }
 register_activation_hook(__FILE__, ['MIK\\DB', 'install']);
@@ -27,6 +27,8 @@ add_action('plugins_loaded', function () {
     if (get_option('mik_schema_version') !== MIK_VERSION) { \MIK\DB::install(); }
     \MIK\Settings::upgrade();
     \MIK\Catalog::hooks();
+    \MIK\CategoryTree::hooks();
+    \MIK\CategoryJobs::hooks();
     \MIK\API::hooks();
     \MIK\Shortcodes::hooks();
     if (is_admin()) { \MIK\Admin::hooks(); }

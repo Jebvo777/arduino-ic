@@ -5,15 +5,17 @@ defined('ABSPATH') || exit;
 class Shortcodes {
     public const MAP=[
         'mik_products_carousel'=>'carousel','mik_search'=>'search','mik_wishlist_icon'=>'wishlist-icon','mik_account_icon'=>'account-icon','mik_cart_icon'=>'cart-icon','mik_catalog_button'=>'catalog-button','mik_store_status'=>'store-status','mik_catalog'=>'catalog','mik_product'=>'product','mik_cart'=>'cart','mik_wishlist'=>'wishlist','mik_account'=>'account','mik_wholesale'=>'wholesale','mik_purchase_info'=>'purchase','mik_company_info'=>'company','mik_contacts'=>'contacts','mik_legal'=>'legal','mik_slider'=>'slider',
-        'mik_legal_entities'=>'business','mik_how_to_buy'=>'purchase','mik_payment'=>'payment','mik_delivery'=>'delivery','mik_help'=>'help','mik_footer'=>'footer','mik_mobile_menu'=>'mobile-menu','mik_logo'=>'logo',
+        'mik_legal_entities'=>'business','mik_how_to_buy'=>'purchase','mik_payment'=>'payment','mik_delivery'=>'delivery','mik_help'=>'help','mik_footer'=>'footer','mik_mobile_menu'=>'mobile-menu','mik_logo'=>'logo','mik_header_categories'=>'header-categories','mik_category_cards'=>'category-cards',
     ];
     public static function hooks(): void {
+        add_filter('get_site_icon_url',fn($url)=>$url?:MIK_URL.'assets/img/store-favicon.png');
         add_action('wp_enqueue_scripts',[self::class,'assets']);
         foreach(self::MAP as $tag=>$type){add_shortcode($tag,fn($atts=[])=>self::render($type,(array)$atts));}
     }
     public static function assets(): void {
         wp_enqueue_style('mik-shop',MIK_URL.'assets/css/store.css',[],MIK_VERSION);
         wp_enqueue_style('mik-layout',MIK_URL.'assets/css/layout.css',['mik-shop'],MIK_VERSION);
+        wp_enqueue_style('mik-refinements',MIK_URL.'assets/css/refinements.css',['mik-layout'],MIK_VERSION);
         wp_enqueue_script('mik-shop',MIK_URL.'assets/js/store.js',[],MIK_VERSION,true);
         $s=Settings::all();$style='.mik{';foreach($s['colors'] as $k=>$v){$style.='--mik-'.sanitize_key($k).':'.sanitize_hex_color($v).';';}$style.='--mik-heading-font:"'.esc_attr($s['heading_font']).'",sans-serif;--mik-body-font:"'.esc_attr($s['body_font']).'",sans-serif;}';wp_add_inline_style('mik-shop',$style);
         if($s['load_fonts']){wp_enqueue_style('mik-fonts',MIK_URL.'assets/css/fonts.css',[],MIK_VERSION);}
@@ -27,8 +29,12 @@ class Shortcodes {
             $attrs['view']=($a['view']??'grid')==='list'?'list':'grid';$attrs['limit']=max(6,min(60,(int)($a['per_page']??Settings::get('per_page'))));
         }
         if($type==='carousel'){$attrs=array_merge(Settings::get('carousel'),array_intersect_key($a,array_flip(['title','limit','columns','source','category'])));}
+        if(in_array($type,['header-categories','category-cards'],true)){
+            $section=$type==='header-categories'?'header_categories':'category_cards';$attrs=array_merge(Settings::get($section),array_intersect_key($a,array_flip(['limit','ids','parent','children'])));
+            $attrs['ids']=is_array($attrs['ids'])?$attrs['ids']:explode(',',(string)$attrs['ids']);$attrs['ids']=array_values(array_filter(array_map('absint',$attrs['ids'])));if(!$attrs['ids']&&empty($attrs['parent'])){$attrs['ids']=CategoryTree::featured_ids();}
+        }
         if($type==='slider'){
-            $slides=Settings::get('slides');foreach($slides as &$s){if(!$s['image']){$s['image']=MIK_URL.'assets/img/'.$s['local_image'];}$s['url']=self::link($s['url']);$s['secondary_url']=self::link($s['secondary_url']);}unset($s);$attrs['slides']=$slides;
+            $slides=Settings::get('slides');foreach($slides as &$s){if(!$s['image']){$s['image']=MIK_URL.'assets/img/'.$s['local_image'];}$s['url']=self::link($s['url']);$s['secondary_url']=self::link($s['secondary_url']);}unset($s);$attrs['slides']=$slides;if(Settings::get('hero_cycle')){$attrs['photos']=array_map(fn($p)=>preg_match('~^https?://~i',$p)?$p:MIK_URL.'assets/img/'.sanitize_file_name($p),Settings::get('hero_photos'));}
         }
         if(array_key_exists($type,Layout::page_defaults())){$content=Layout::page($type);$type='static';}
         if($type==='footer'){$content=Layout::footer();$type='static';}

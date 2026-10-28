@@ -5,14 +5,15 @@ defined('ABSPATH') || exit;
 class Settings {
     public static function defaults(): array {
         return [
-            'store_name'=>'МИКРИК', 'phone'=>'+7 (925) 888-67-76', 'email'=>get_option('admin_email'),
+            'store_name'=>'Купить микросхемы и транзисторы', 'phone'=>'+7 (925) 888-67-76', 'email'=>get_option('admin_email'),
             'timezone'=>'Europe/Moscow', 'days'=>[1,2,3,4,5], 'open'=>'10:00', 'close'=>'19:00',
             'hours_label'=>'Пн–Пт, 10:00–19:00 МСК', 'telegram'=>'', 'ozon_store'=>'https://www.ozon.ru/search/?text=электронные+компоненты',
             'pickup'=>true, 'pickup_address'=>'Адрес самовывоза уточняется у менеджера',
             'guest_prices'=>true, 'currency'=>'RUB', 'usd_rate'=>0, 'tax_label'=>'Без НДС',
             'cart_slug'=>'cart-mik', 'wishlist_slug'=>'wishlist-mik', 'account_slug'=>'lk-mik', 'shop_slug'=>'shop',
             'company_slug'=>'about-mik','purchase_slug'=>'how-mik','payment_slug'=>'payment-mik','delivery_slug'=>'delivery-mik','wholesale_slug'=>'opt-mik','business_slug'=>'yur-mik','help_slug'=>'help-mik','legal_slug'=>'pravo-mik','contacts_slug'=>'contacts-mik',
-            'logo_url'=>'','logo_dark_url'=>'',
+            'logo_url'=>'','logo_dark_url'=>'','hero_cycle'=>true,'hero_photos'=>['store-hero-circuits.webp','store-hero-chip.webp'],
+            'header_categories'=>['limit'=>8,'ids'=>[]],'category_cards'=>['limit'=>8,'ids'=>[]],
             'footer'=>['description'=>'Электронные компоненты для ремонта, разработки и производства.','copyright'=>'Интернет-магазин электронных компонентов.','category_limit'=>8,'category_ids'=>[]],
             'per_page'=>24, 'seller'=>['name'=>'','inn'=>'','kpp'=>'','address'=>'','bank'=>'','bik'=>'','account'=>'','correspondent'=>''],
             'colors'=>['background'=>'#F2F4F7','heading'=>'#242A33','text'=>'#454D59','muted'=>'#657080','accent'=>'#F85F03','secondary'=>'#02ADB3'],
@@ -30,7 +31,7 @@ class Settings {
     }
     public static function all(): array {
         $saved=(array)get_option('mik_settings',[]);$all=array_replace_recursive(self::defaults(),$saved);
-        foreach(['days','slides'] as $key){if(array_key_exists($key,$saved)){$all[$key]=array_values((array)$saved[$key]);}}
+        foreach(['days','slides','hero_photos'] as $key){if(array_key_exists($key,$saved)){$all[$key]=array_values((array)$saved[$key]);}}
         foreach((array)($saved['pages']??[]) as $kind=>$page){foreach(['cards','steps','faq'] as $list){if(array_key_exists($list,$page)){$all['pages'][$kind][$list]=array_values((array)$page[$list]);}}}
         if(isset($saved['footer']['category_ids'])){$all['footer']['category_ids']=array_values((array)$saved['footer']['category_ids']);}
         return $all;
@@ -42,6 +43,7 @@ class Settings {
         foreach($names as $kind=>$title){$title=self::get('pages')[$kind]['title']??$title;$out[$kind]=['title'=>$title,'url'=>self::url($kind)];}return $out;
     }
     public static function upgrade(): void {
+        self::upgrade_brand();
         if(get_option('mik_ui_version')==='1.1.0'){return;}$s=(array)get_option('mik_settings',[]);
         if(($s['labels']['search']??'')==='Поиск по маркировке, коду или названию'){$s['labels']['search']='Маркировка, артикул или название';}
         foreach((array)($s['pages']??[]) as $key=>$page){$html=$page['content']??'';
@@ -50,6 +52,12 @@ class Settings {
         }
         foreach((array)($s['slides']??[]) as $i=>$slide){foreach(['url','secondary_url'] as $key){$old=$slide[$key]??'';if($old==='/wholesale-mik/'){$s['slides'][$i][$key]='/opt-mik/';}if($old==='/purchase-mik/'){$s['slides'][$i][$key]='/delivery-mik/';}}}
         update_option('mik_settings',$s,false);update_option('mik_ui_version','1.1.0',false);
+    }
+    private static function upgrade_brand(): void {
+        if(get_option('mik_brand_version')==='1.3.0'){return;}$s=(array)get_option('mik_settings',[]);
+        update_option('mik_brand_previous_130',['store_name'=>$s['store_name']??'','logo_url'=>$s['logo_url']??'','logo_dark_url'=>$s['logo_dark_url']??''],false);
+        $s['store_name']='Купить микросхемы и транзисторы';$s['logo_url']='';$s['logo_dark_url']='';$s['hero_cycle']=true;$s['hero_photos']=['store-hero-circuits.webp','store-hero-chip.webp'];
+        update_option('mik_settings',$s,false);update_option('mik_brand_version','1.3.0',false);
     }
     public static function save(array $in): void {
         $clean=self::all();
@@ -90,6 +98,9 @@ class Settings {
         }
         if(isset($in['carousel'])){$clean['carousel']=['title'=>sanitize_text_field($in['carousel']['title']??''),'limit'=>max(4,min(40,(int)($in['carousel']['limit']??12))),'columns'=>max(1,min(6,(int)($in['carousel']['columns']??4))),'source'=>in_array($in['carousel']['source']??'',['featured','new','all'],true)?$in['carousel']['source']:'featured'];}
         if(isset($in['blocks'])&&is_array($in['blocks'])){foreach($in['blocks'] as $k=>$block){if(in_array($k,array_values(Shortcodes::MAP),true)){$clean['blocks'][$k]=['title'=>sanitize_text_field($block['title']??''),'text'=>wp_kses_post($block['text']??'')];}}}
+        if(array_key_exists('hero_cycle',$in)){$clean['hero_cycle']=(bool)$in['hero_cycle'];}
+        if(isset($in['hero_photos'])){$photos=array_values((array)$in['hero_photos']);$clean['hero_photos']=[];foreach(array_slice($photos,0,2) as $photo){$clean['hero_photos'][]=preg_match('~^https?://~i',$photo)?esc_url_raw($photo):sanitize_file_name($photo);}if(!$clean['hero_photos']){$clean['hero_photos']=self::defaults()['hero_photos'];}}
+        foreach(['header_categories','category_cards'] as $section){if(isset($in[$section])){$r=(array)$in[$section];$ids=is_array($r['ids']??null)?$r['ids']:explode(',',(string)($r['ids']??''));$clean[$section]=['limit'=>max(1,min(24,(int)($r['limit']??8))),'ids'=>array_values(array_filter(array_map('absint',$ids)))];}}
         update_option('mik_settings',$clean,false);
     }
     public static function hours(): array {

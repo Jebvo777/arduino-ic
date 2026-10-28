@@ -1,0 +1,402 @@
+[
+  {
+    "key": "ic",
+    "name": "Интегральные микросхемы",
+    "featured": true,
+    "order": 10,
+    "children": [
+      {
+        "key": "ic-general",
+        "name": "Микросхемы общего назначения"
+      },
+      {
+        "key": "opamps",
+        "name": "Операционные усилители"
+      },
+      {
+        "key": "logic",
+        "name": "Стандартная логика"
+      },
+      {
+        "key": "memory",
+        "name": "Память"
+      },
+      {
+        "key": "audio-video",
+        "name": "Аудио- и видеомикросхемы"
+      },
+      {
+        "key": "interfaces",
+        "name": "Интерфейсы и приёмопередатчики"
+      },
+      {
+        "key": "drivers",
+        "name": "Драйверы"
+      },
+      {
+        "key": "timers",
+        "name": "Таймеры и генераторы"
+      },
+      {
+        "key": "adc-dac",
+        "name": "АЦП, ЦАП и аналоговые коммутаторы"
+      },
+      {
+        "key": "supervisors",
+        "name": "Супервизоры и компараторы"
+      }
+    ]
+  },
+  {
+    "key": "semiconductors",
+    "name": "Дискретные полупроводники",
+    "featured": true,
+    "order": 20,
+    "children": [
+      {
+        "key": "bipolar",
+        "name": "Биполярные транзисторы"
+      },
+      {
+        "key": "mosfet",
+        "name": "MOSFET-транзисторы"
+      },
+      {
+        "key": "igbt",
+        "name": "IGBT-транзисторы"
+      },
+      {
+        "key": "thyristors",
+        "name": "Тиристоры и динисторы"
+      },
+      {
+        "key": "triacs",
+        "name": "Симисторы"
+      },
+      {
+        "key": "optocouplers",
+        "name": "Оптопары"
+      },
+      {
+        "key": "phototransistors",
+        "name": "Оптотранзисторы"
+      },
+      {
+        "key": "ssr",
+        "name": "Твердотельные реле"
+      }
+    ]
+  },
+  {
+    "key": "diodes",
+    "name": "Диоды и выпрямители",
+    "featured": true,
+    "order": 30,
+    "children": [
+      {
+        "key": "diodes-general",
+        "name": "Диоды общего назначения"
+      },
+      {
+        "key": "rectifiers",
+        "name": "Выпрямительные диоды"
+      },
+      {
+        "key": "schottky",
+        "name": "Диоды Шоттки"
+      },
+      {
+        "key": "fast-diodes",
+        "name": "Быстрые диоды"
+      },
+      {
+        "key": "ultrafast-diodes",
+        "name": "Супербыстрые диоды"
+      },
+      {
+        "key": "zener",
+        "name": "Стабилитроны"
+      },
+      {
+        "key": "bridges",
+        "name": "Диодные мосты"
+      },
+      {
+        "key": "tvs",
+        "name": "Защитные диоды TVS"
+      },
+      {
+        "key": "led",
+        "name": "Светодиоды и ИК-излучатели"
+      },
+      {
+        "key": "rf-diodes",
+        "name": "ВЧ-диоды и варикапы"
+      }
+    ]
+  },
+  {
+    "key": "microcontrollers",
+    "name": "Микроконтроллеры",
+    "featured": true,
+    "order": 40,
+    "children": [
+      {
+        "key": "pic",
+        "name": "PIC-контроллеры"
+      },
+      {
+        "key": "avr",
+        "name": "AVR-контроллеры"
+      },
+      {
+        "key": "arm",
+        "name": "ARM- и STM32-контроллеры"
+      },
+      {
+        "key": "mcu-other",
+        "name": "Другие микроконтроллеры"
+      },
+      {
+        "key": "programmers",
+        "name": "Программаторы"
+      },
+      {
+        "key": "boards",
+        "name": "Платы Arduino и одноплатные компьютеры"
+      },
+      {
+        "key": "modules",
+        "name": "Модули и платы расширения"
+      },
+      {
+        "key": "wireless",
+        "name": "Модули беспроводной связи"
+      },
+      {
+        "key": "sensors",
+        "name": "Датчики и сенсоры"
+      },
+      {
+        "key": "displays",
+        "name": "Дисплеи и индикаторы"
+      },
+      {
+        "key": "kits",
+        "name": "Наборы для разработки"
+      }
+    ]
+  },
+  {
+    "key": "passive",
+    "name": "Пассивные компоненты",
+    "featured": true,
+    "order": 50,
+    "children": [
+      {
+        "key": "resistors",
+        "name": "Резисторы и потенциометры"
+      },
+      {
+        "key": "capacitors-electro",
+        "name": "Электролитические конденсаторы"
+      },
+      {
+        "key": "capacitors-smd",
+        "name": "SMD-конденсаторы"
+      },
+      {
+        "key": "capacitors-other",
+        "name": "Другие конденсаторы"
+      },
+      {
+        "key": "inductors",
+        "name": "Дроссели и индуктивности"
+      },
+      {
+        "key": "quartz",
+        "name": "Кварцевые резонаторы и генераторы"
+      },
+      {
+        "key": "filters",
+        "name": "Пьезокерамические и другие фильтры"
+      },
+      {
+        "key": "transformers",
+        "name": "Трансформаторы и ферриты"
+      }
+    ]
+  },
+  {
+    "key": "power",
+    "name": "Источники питания",
+    "featured": true,
+    "order": 60,
+    "children": [
+      {
+        "key": "power-supplies",
+        "name": "Блоки питания"
+      },
+      {
+        "key": "power-adapters",
+        "name": "Сетевые адаптеры"
+      },
+      {
+        "key": "dc-dc",
+        "name": "DC-DC преобразователи"
+      },
+      {
+        "key": "pwm",
+        "name": "ШИМ- и SMPS-контроллеры"
+      },
+      {
+        "key": "pfc",
+        "name": "Корректоры коэффициента мощности"
+      },
+      {
+        "key": "regulators",
+        "name": "Стабилизаторы напряжения"
+      },
+      {
+        "key": "charging",
+        "name": "Зарядные устройства и BMS"
+      },
+      {
+        "key": "batteries",
+        "name": "Батарейки и аккумуляторы"
+      }
+    ]
+  },
+  {
+    "key": "connectors",
+    "name": "Разъёмы и кабели",
+    "featured": true,
+    "order": 70,
+    "children": [
+      {
+        "key": "usb",
+        "name": "USB-разъёмы и переходники"
+      },
+      {
+        "key": "dip-sockets",
+        "name": "Панельки DIP"
+      },
+      {
+        "key": "pin-headers",
+        "name": "Штырьковые разъёмы"
+      },
+      {
+        "key": "connectors-other",
+        "name": "Другие разъёмы"
+      },
+      {
+        "key": "cables",
+        "name": "Кабели и провода"
+      },
+      {
+        "key": "ribbon",
+        "name": "Шлейфы"
+      },
+      {
+        "key": "breadboard-wires",
+        "name": "Макетные провода"
+      },
+      {
+        "key": "breadboards",
+        "name": "Макетные платы"
+      }
+    ]
+  },
+  {
+    "key": "protection",
+    "name": "Защита и термокомпоненты",
+    "featured": true,
+    "order": 80,
+    "children": [
+      {
+        "key": "fuses",
+        "name": "Предохранители"
+      },
+      {
+        "key": "resettable-fuses",
+        "name": "Самовосстанавливающиеся предохранители"
+      },
+      {
+        "key": "thermal-fuses",
+        "name": "Термопредохранители"
+      },
+      {
+        "key": "thermistors",
+        "name": "Терморезисторы"
+      },
+      {
+        "key": "varistors",
+        "name": "Варисторы"
+      },
+      {
+        "key": "heatsinks",
+        "name": "Радиаторы и вентиляторы"
+      },
+      {
+        "key": "thermal-materials",
+        "name": "Термопаста и изоляционные материалы"
+      }
+    ]
+  },
+  {
+    "key": "accessories",
+    "name": "Инструменты и комплектующие",
+    "featured": false,
+    "order": 90,
+    "children": [
+      {
+        "key": "relays-switches",
+        "name": "Реле, кнопки и переключатели"
+      },
+      {
+        "key": "motors",
+        "name": "Моторы и сервоприводы"
+      },
+      {
+        "key": "soldering",
+        "name": "Инструменты для пайки"
+      },
+      {
+        "key": "meters",
+        "name": "Измерительные приборы"
+      },
+      {
+        "key": "laser-heads",
+        "name": "Лазерные головки и приводы"
+      },
+      {
+        "key": "acoustic",
+        "name": "Микрофоны и звуковые излучатели"
+      },
+      {
+        "key": "printing-3d",
+        "name": "3D-принтеры и материалы"
+      },
+      {
+        "key": "accessories-other",
+        "name": "Другие комплектующие"
+      },
+      {
+        "key": "lamps",
+        "name": "Лампы и подсветка"
+      }
+    ]
+  },
+  {
+    "key": "other",
+    "name": "Прочие компоненты",
+    "featured": false,
+    "order": 100,
+    "children": [
+      {
+        "key": "review",
+        "name": "Требуют уточнения"
+      }
+    ]
+  }
+]

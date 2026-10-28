@@ -4,6 +4,7 @@ defined('ABSPATH') || exit;
 
 class API {
     public static function hooks(): void {
+        add_action('admin_post_mik_category_backup',[CategoryJobs::class,'download']);
         add_action('rest_api_init',[self::class,'routes']);
         foreach(['admin_post_mik_document','admin_post_nopriv_mik_document'] as $hook){add_action($hook,[self::class,'document']);}
     }
@@ -46,6 +47,7 @@ class API {
         self::route('/orders','GET',fn()=>Commerce::orders());
         self::route('/orders','POST',fn($r)=>Commerce::checkout(self::payload($r)),'write');
         self::route('/orders/(?P<id>\d+)','GET',fn($r)=>Commerce::order((int)$r['id']));
+        self::route('/categories-job/(?P<action>[a-z_-]+)','POST',fn($r)=>CategoryJobs::dispatch(sanitize_key($r['action']),self::payload($r)),'admin');
         self::route('/admin/media/upload','POST',fn($r)=>Admin::upload_media($r),'admin');
         self::route('/admin/(?P<tab>[a-z_-]+)','GET',fn($r)=>Admin::data(sanitize_key($r['tab']),$r->get_params()),'admin');
         self::route('/admin/(?P<tab>[a-z_-]+)','POST',fn($r)=>Admin::save(sanitize_key($r['tab']),self::payload($r)),'admin');
