@@ -97,9 +97,9 @@ class Catalog {
         $ids=$wpdb->get_col('SELECT p.ID'.$sql.' ORDER BY '.$order.' LIMIT '.(int)$limit.' OFFSET '.(($page-1)*$limit));
         return ['items'=>array_values(array_filter(array_map(fn($id)=>self::product((int)$id),$ids))),'total'=>$total,'page'=>$page,'pages'=>(int)ceil($total/$limit),'group'=>Auth::customer()?$g['name']:null,'currency'=>$g['currency']];
     }
-    public static function invalidate_categories(): void { delete_transient('mik_categories_v130');delete_transient('mik_categories_v140'); }
+    public static function invalidate_categories(): void { delete_transient('mik_categories_v130');delete_transient('mik_categories_v140');delete_transient('mik_categories_v141'); }
     public static function categories(): array {
-        $cached=get_transient('mik_categories_v140');if(is_array($cached)){return $cached;}
+        $cached=get_transient('mik_categories_v141');if(is_array($cached)){return $cached;}
         $terms=get_terms(['taxonomy'=>'product_cat','hide_empty'=>false,'number'=>0,'orderby'=>'name','order'=>'ASC']);if(is_wp_error($terms)){return [];}
         $terms=array_values(array_filter($terms,fn($t)=>!get_term_meta($t->term_id,'_mik_archived',true)));$by=[];$images=[];
         foreach($terms as $t){$by[(int)$t->term_id]=$t;$own=(int)get_term_meta($t->term_id,'thumbnail_id',true);if($own&&wp_attachment_is_image($own)){$images[(int)$t->term_id]=$own;}}
@@ -108,7 +108,7 @@ class Catalog {
         foreach($terms as $t){$image=$images[(int)$t->term_id]??0;$parent=(int)$t->parent;$seen=[];while($image&&$parent&&isset($by[$parent])&&!isset($seen[$parent])){$seen[$parent]=true;if(!isset($images[$parent]))$images[$parent]=$image;$parent=(int)$by[$parent]->parent;}}
         $image_ids=array_values(array_unique($images));if($image_ids){get_posts(['post_type'=>'attachment','post_status'=>'inherit','post__in'=>$image_ids,'posts_per_page'=>-1,'update_post_meta_cache'=>true,'update_post_term_cache'=>false]);}
         $art=CategoryArt::images();$out=[];foreach($terms as $t){$url=get_term_link($t);$image=$images[(int)$t->term_id]??0;$key=(string)get_term_meta($t->term_id,'_mik_tree_key',true);$image_url=$art[$key]??($image?(wp_get_attachment_image_url($image,'medium')?:''):'');$out[]=['id'=>(int)$t->term_id,'parent'=>(int)$t->parent,'name'=>$t->name,'slug'=>$t->slug,'count'=>(int)$t->count,'url'=>is_wp_error($url)?Settings::url('shop'):$url,'image'=>$image_url,'key'=>$key,'order'=>(int)get_term_meta($t->term_id,'_mik_order',true)];}
-        usort($out,fn($a,$b)=>(($a['order']?:999999)<=>($b['order']?:999999))?:strnatcasecmp($a['name'],$b['name']));$children=[];$known=array_column($out,'id');foreach($out as $c){$parent=in_array($c['parent'],$known,true)?$c['parent']:0;$children[$parent][]=$c;}$ordered=[];$seen=[];$walk=function($parent)use(&$walk,&$ordered,&$seen,$children){foreach($children[$parent]??[] as $c){if(isset($seen[$c['id']]))continue;$seen[$c['id']]=true;$ordered[]=$c;$walk($c['id']);}};$walk(0);foreach($out as $c){if(!isset($seen[$c['id']]))$ordered[]=$c;}set_transient('mik_categories_v140',$ordered,600);return $ordered;
+        usort($out,fn($a,$b)=>(($a['order']?:999999)<=>($b['order']?:999999))?:strnatcasecmp($a['name'],$b['name']));$children=[];$known=array_column($out,'id');foreach($out as $c){$parent=in_array($c['parent'],$known,true)?$c['parent']:0;$children[$parent][]=$c;}$ordered=[];$seen=[];$walk=function($parent)use(&$walk,&$ordered,&$seen,$children){foreach($children[$parent]??[] as $c){if(isset($seen[$c['id']]))continue;$seen[$c['id']]=true;$ordered[]=$c;$walk($c['id']);}};$walk(0);foreach($out as $c){if(!isset($seen[$c['id']]))$ordered[]=$c;}set_transient('mik_categories_v141',$ordered,600);return $ordered;
     }
     public static function filters(): array {
         global $wpdb;$rows=$wpdb->get_results('SELECT param_key,label,value,unit FROM '.DB::table('specs').' GROUP BY param_key,label,value,unit ORDER BY label,value LIMIT 600',ARRAY_A);$out=[];
